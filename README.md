@@ -1,0 +1,31 @@
+An algorithm that detects sign language, turns it into text (and also reads out individual signs) and then turns it into speech by combining all signs into a logical sentence. (ASL Grammar is different from normal spoken grammar so the last step is necessary)
+
+THIS IS MY PERSONAL PROJECT FOR SCHOOL, FEEL FREE TO READ MY DEVLOGS!
+
+UPDATES DAILY. (hopefully)
+
+Daily log:
+
+Day 1: initial setup w/ openCV & yolov9 detector script
+
+Day 2: integrated mediapipe tasks API hand landmarker, custom 21 point joint overlay, & realtime ui buffer
+
+Day 3: rf ml pipeline & live asl gesture classifier alphabet only at the moment. Will try to re-incorporate the emotions classifier & real words into the model tomorrow.
+
+Day 4: longer update today! normalized ASL hand landmarks relative to the wrist & trained a rf model for position independent gesture recognition. added a 7 frame rolling prediction buffer to smooth live webcam outputs & eliminate prediction jitter. will try to do aforementioned things in day 3 tomorrow as well as improve accuracy as it's at 80.05 rn...
+
+Day 5: struggled with the mediapipe import bug A LOT today. fixed it by downgrading, figured out it was due to a bug w/ apple silicon. got the accuracy up from 80% to 95% which im super happy abt! re-incorporated the emotions tracker. tomorrow: make the facial tracker better for sad & happy emotions, try to incorporate both hands into the tracking, incroporate hold to commit which is like wait 2-3 seconds to append a letter to current-word & add a mechanism to delete. and if i'm successful with the current word thing, adding a display of what current_word is. WOW! that's one long list... 
+
+Day 6: real progress is happening! refined emotion detector especially with the 'sad' emotion and made the 'happy' detector better by prioritizing it in the detection process. i added a open hand stop/start gesture control (progress bar, too) with a 2 second hold to commit mechanic that appends detected ASL letters into words (so basically finger spelling) tomorrow: i will try to add a space & deleting mechanism, try to make the displayed word be read out loud, try to add both hands into tracking to prepare for the addition of words.
+
+Day 7: ONE WEEK IN! anyways, today i added double hand tracking & a text to speech engine so the algorithm can sound out letters appended to current_word & sound out words formed by finger spelling after the finish gesture. before that, I added a clear all buttonn & gesture, and deleting & space mechanisms. tomorrow i will: remove the clear gesture (it makes things harder than they need to be), try to stop the algorithm from sounding out A as CAPITAL A and more like just 'a', and i will make an attempt to make the voice less robot-y (or at least do some research on how to) 
+
+Day 8: Today, I made the algorithm pronounce the final word (decided after the finish gesture) & made all pronounciations lowercase (no more capital a), made a delete button & erased the clear & delete gestures, added a controls box that tells the user and thats about it. TOMORROW, I will try to: improve accuracy (aiming for 97-97.5%), add a button to restart the algorithm but still save the past word after the final word is repronunced, add a button to re-say the word after it's already said once, and lastly try to make the voice less robot-y, i did some research on that today.
+
+Day 9: Today I added a .gitignore, got the accuracy up to 97.51%(which I'm really proud of), added the "press q to quit" instruction to the controls box, added a new word/continue & repronounce button, made a past words box (thats only viewable after one presses continue >1 times), and lastly made the robot's lady's voice less robotic via azure neural voices with edge tts. tomorrow, i will TRY to: find out a way to store all past words locally in hopes that somebody else will be able to use my data afterwards, reduce lag (drastically, hopefully) & maybe start looking for word datasets that are diverse? and maybe, just maybe like add emotional cues like if suprised/curious look -> question mark etc.
+
+Day 10: Lazy day today, I was only able to fix the lag by changing the architecture a bit: I moved emotion detection & asl classification to background thread while keeping mp hand tracking synchronized on the main thread. Tomorrow I will: find out a way to store all past words locally so that somebody else will be able to use my data afterwards, start looking for word datasets that are diverse and  add emotional cues like if suprised/curious look -> question mark etc. Also: I'll try to fix the layout of the demo because I broke it today.
+
+Day 11: Added 2 things: fixed layout i broke yesterday & added emotional punctuation. cues are neutral(.) angry (! (angry)) happy (! (happy)) shocked(?). Tomorrow I will: add the option to choose between a male & a female voice & start looking for word datasets.
+
+Day 12: i've been SO busy as of late, and have had no time at all to update -- sorry! i added the option to change between male & female voices. tomorrow i will add the option to change punctuation before confirming the final sentecne to change the pronunciation, make the algorithm stop reading (angry) & (happy) and finally increase accuracy to hopefully %99.

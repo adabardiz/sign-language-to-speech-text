@@ -1,0 +1,14 @@
+.venv/
+env/
+venv/
+
+__pycache__/
+*.pyc
+
+.vscode/
+.DS_Store
+
+yolov9c.pt
+*.csvtts_cache/
+*.mp3
+*.mp4
