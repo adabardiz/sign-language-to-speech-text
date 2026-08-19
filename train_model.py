@@ -50,6 +50,21 @@ def extract_hand_features(pts):
         else:
             feats.append(0.0)
 
+
+    v_index = norm_pts[8] - norm_pts[5]
+    v_middle = norm_pts[12] - norm_pts[9]
+    norm_idx = np.linalg.norm(v_index)
+    norm_mid = np.linalg.norm(v_middle)
+    
+    if norm_idx > 0 and norm_mid > 0:
+        ru_angle = np.dot(v_index, v_middle) / (norm_idx * norm_mid)
+        feats.append(float(ru_angle))
+    else:
+        feats.append(0.0)
+
+    feats.append(float(np.linalg.norm(norm_pts[4] - norm_pts[6])))
+    feats.append(float(np.linalg.norm(norm_pts[4] - norm_pts[10])))
+
     return feats
 
 def augment_and_extract(data_frame, num_copies=4, noise_level=0.015):
