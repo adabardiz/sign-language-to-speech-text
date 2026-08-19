@@ -98,6 +98,20 @@ def extract_hand_features(pts):
         else:
             feats.append(0.0)
 
+    v_index = norm_pts[8] - norm_pts[5]
+    v_middle = norm_pts[12] - norm_pts[9]
+    norm_idx = np.linalg.norm(v_index)
+    norm_mid = np.linalg.norm(v_middle)
+    
+    if norm_idx > 0 and norm_mid > 0:
+        ru_angle = np.dot(v_index, v_middle) / (norm_idx * norm_mid)
+        feats.append(float(ru_angle))
+    else:
+        feats.append(0.0)
+
+    feats.append(float(np.linalg.norm(norm_pts[4] - norm_pts[6])))
+    feats.append(float(np.linalg.norm(norm_pts[4] - norm_pts[10])))
+
     return feats
 
 class SpeechEngine:
@@ -169,32 +183,49 @@ class BackgroundAI:
         self.result_lock = threading.Lock()
         
         self.predicted_letter = "-"
+        self.wrist_history = deque(maxlen=15) #remember the last 15 frames of movement
         
         self.running = True
         self.thread = threading.Thread(target=self.run, daemon=True)
         self.thread.start()
 
-    def update_data(self, features):
+    def update_data(self, features, raw_wrist_x=None):
         if not self.data_queue.empty():
             try:
                 self.data_queue.get_nowait()
             except queue.Empty:
                 pass
-        self.data_queue.put(features)
-
+        self.data_queue.put((features, raw_wrist_x)) 
     def run(self):
         prediction_buffer = deque(maxlen=7)
         
         while self.running:
-            features = self.data_queue.get()
+            item = self.data_queue.get()
+            if isinstance(item, tuple):
+                features, raw_wrist_x = item
+            else:
+                features, raw_wrist_x = item, None
+
             local_letter = self.predicted_letter
                     
             if features is not None and self.asl_model:
+                if raw_wrist_x is not None:
+                    self.wrist_history.append(raw_wrist_x) #track movement
+                
                 raw_pred = self.asl_model.predict([features])[0]
+                
+                if raw_pred in ['I', 'J'] and len(self.wrist_history) == 15:
+                    movement = self.wrist_history[0] - self.wrist_history[-1]
+                    if movement > 0.05: #adjust this threshold based on testing
+                        raw_pred = 'J'
+                    else:
+                        raw_pred = 'I'
+                        
                 prediction_buffer.append(raw_pred)
                 local_letter = Counter(prediction_buffer).most_common(1)[0][0]
             elif features is None:
                 prediction_buffer.clear()
+                self.wrist_history.clear()
                 local_letter = "-"
 
             with self.result_lock:
@@ -304,7 +335,6 @@ def main():
                     btn_w = 200
                     start_x = cx - 320
 
-                    # .
                     if (start_x) <= mx <= (start_x + btn_w) and btn_y1 <= my <= btn_y2:
                         finished_word = current_word.strip() + "."
                         selected_tone = "neutral"
@@ -431,7 +461,8 @@ def main():
 
             pts = np.array([[lm.x, lm.y, lm.z] for lm in primary_hand])
             features = extract_hand_features(pts)
-            bg_ai.update_data(features)
+            
+            bg_ai.update_data(features, primary_hand[0].x)
 
             for hand_landmarks in all_hands:
                 for connection in HAND_CONNECTIONS:
@@ -443,7 +474,7 @@ def main():
                     x, y = int(landmark.x * w), int(landmark.y * h)
                     cv2.circle(frame, (x, y), 4, (0, 255, 0), -1)
         else:
-            bg_ai.update_data(None)
+            bg_ai.update_data(None, None)
             open_hand_start_time = None
             space_start_time = None
             letter_hold_start_time = None
