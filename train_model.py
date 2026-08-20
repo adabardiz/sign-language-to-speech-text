@@ -1,13 +1,14 @@
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
-import seaborn as sns
 from sklearn.model_selection import train_test_split
 from sklearn.ensemble import HistGradientBoostingClassifier
-from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
+from sklearn.metrics import accuracy_score
 import joblib
 
 def extract_hand_features(pts):
+    """
+    extracts 126 engineered spatial features from 21 hand landmarks
+    """
     pts = np.array(pts)
     wrist = pts[0]
     rel_pts = pts - wrist
@@ -33,11 +34,11 @@ def extract_hand_features(pts):
             feats.append(float(np.linalg.norm(norm_pts[tip] - norm_pts[mcp])))
 
     finger_chains = [
-        [1, 2, 3, 4],     #thumb
-        [5, 6, 7, 8],     #index
-        [9, 10, 11, 12],  #middle
-        [13, 14, 15, 16], #ring
-        [17, 18, 19, 20]  #pinky
+        [1, 2, 3, 4],     # thumb
+        [5, 6, 7, 8],     # index
+        [9, 10, 11, 12],  # middle
+        [13, 14, 15, 16], # ring
+        [17, 18, 19, 20]  # pinky
     ]
     for chain in finger_chains:
         v1 = norm_pts[chain[1]] - norm_pts[chain[0]]
@@ -49,7 +50,6 @@ def extract_hand_features(pts):
             feats.append(float(np.clip(cos_angle, -1.0, 1.0)))
         else:
             feats.append(0.0)
-
 
     v_index = norm_pts[8] - norm_pts[5]
     v_middle = norm_pts[12] - norm_pts[9]
@@ -67,75 +67,42 @@ def extract_hand_features(pts):
 
     return feats
 
-def augment_and_extract(data_frame, num_copies=4, noise_level=0.015):
-    """
-    takes raw landmarks creates slightly noisy clones for training data,
-    and extracts advanced geometric features.
-    """
-    X_raw = data_frame.drop(columns=['label']).values
-    y_raw = data_frame['label'].values
+def main():
+    print("Loading CSV dataset...")
+    df = pd.read_csv('asl_landmarks.csv')
     
-    features_list = []
-    labels_list = []
-    
-    for i, row in enumerate(X_raw):
-        pts = row.reshape(21, 3)
-        
-        features_list.append(extract_hand_features(pts))
-        labels_list.append(y_raw[i])
-        
-        #generate noisy clones only active when num_copies> 0
-        for _ in range(num_copies):
-            noise = np.random.normal(0, noise_level, pts.shape)
-            noisy_pts = pts + noise
-            features_list.append(extract_hand_features(noisy_pts))
-            labels_list.append(y_raw[i])
-            
-    return np.array(features_list), np.array(labels_list)
+    if 'label' in df.columns:
+        y = df['label'].values
+        X_raw = df.drop(columns=['label']).values
+    else:
+        y = df.iloc[:, 0].values
+        X_raw = df.iloc[:, 1:].values
 
-print("loading dataset...")
-data = pd.read_csv('asl_landmarks.csv')
+    #transform 63 raw coordinate features into 126 engineered features
+    if X_raw.shape[1] == 63:
+        print("Transforming 63 landmark coordinates into 126 engineered features...")
+        X_list = []
+        for row in X_raw:
+            pts = row.reshape(21, 3)
+            feats = extract_hand_features(pts)
+            X_list.append(feats)
+        X = np.array(X_list)
+    else:
+        print(f"Dataset already contains {X_raw.shape[1]} features.")
+        X = X_raw
 
-#split raw dataset FIRST 
-train_df, test_df = train_test_split(data, test_size=0.2, random_state=42, stratify=data['label'])
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
-#creates 4 noisy clones per row for only the training set
-print("augmenting training set...")
-X_train, y_train = augment_and_extract(train_df, num_copies=4)
+    print("Training classifier...")
+    clf = HistGradientBoostingClassifier()
+    clf.fit(X_train, y_train)
 
-#pure clean evaluation
-print("extracting features for clean test set...")
-X_test, y_test = augment_and_extract(test_df, num_copies=0)
+    preds = clf.predict(X_test)
+    acc = accuracy_score(y_test, preds)
+    print(f"Model validation accuracy: {acc * 100:.2f}%")
 
-print(f"Training on {len(X_train)} augmented samples | Testing on {len(X_test)} clean samples.")
+    joblib.dump(clf, 'asl_model.pkl')
+    print("Saved updated model to asl_model.pkl successfully.")
 
-print("training upgraded histgradientboosting classifier...")
-clf = HistGradientBoostingClassifier(
-    random_state=42, 
-    max_iter=500, 
-    learning_rate=0.08, 
-    l2_regularization=0.1
-)
-clf.fit(X_train, y_train)
-
-print("evaluating model against clean test data...")
-y_pred = clf.predict(X_test)
-acc = accuracy_score(y_test, y_pred)
-print(f"\ntrue real world accuracy: {acc * 100:.2f}% ---\n")
-
-print("detailed letter report")
-print(classification_report(y_test, y_pred))
-
-#save confusion matrix heatmap
-cm = confusion_matrix(y_test, y_pred)
-plt.figure(figsize=(14, 10))
-sns.heatmap(cm, annot=True, fmt='d', cmap='Reds', xticklabels=clf.classes_, yticklabels=clf.classes_)
-plt.title('asl letter confusion matrix (look 4 dark red blocks off the center line)', fontsize=14)
-plt.ylabel('actual letter', fontsize=12)
-plt.xlabel('predicted Letter by ai', fontsize=12)
-plt.tight_layout()
-plt.savefig('confusion_matrix.png')
-print("saved diagnostic heatmap to 'confusion_matrix.png'")
-
-joblib.dump(clf, 'asl_model.pkl')
-print("saved upgraded model to 'asl_model.pkl'!")
+if __name__ == "__main__":
+    main()
