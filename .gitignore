@@ -12,3 +12,6 @@ yolov9c.pt
 *.csvtts_cache/
 *.mp3
 *.mp4
+
+tts_cache/
+*.mp3
