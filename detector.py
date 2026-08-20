@@ -15,13 +15,15 @@ from collections import deque, Counter
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
 
+#loading model 
 try:
     asl_model = joblib.load('asl_model.pkl')
-    print("loaded ASL gesture model successfully.")
+    print("loaded asl model cooked and ready")
 except Exception as e:
-    print("error loading asl_model.pkl:", e)
+    print("error loading model bro:", e)
     asl_model = None
 
+#hand bones mapping 
 HAND_CONNECTIONS = [
     (0, 1), (1, 2), (2, 3), (3, 4),         # thumb
     (5, 6), (6, 7), (7, 8),                 # index 
@@ -31,6 +33,7 @@ HAND_CONNECTIONS = [
     (0, 5), (5, 9), (9, 13), (13, 17), (0, 17) # palm
 ]
 
+#webcam thread so frame rate stays smooth 
 class WebcamVideoStream:
     def __init__(self, src=0):
         self.stream = cv2.VideoCapture(src, cv2.CAP_AVFOUNDATION)
@@ -55,6 +58,7 @@ class WebcamVideoStream:
         self.stopped = True
         self.stream.release()
 
+#math math math don't worry abt it
 def extract_hand_features(pts):
     pts = np.array(pts)
     wrist = pts[0]
@@ -114,6 +118,7 @@ def extract_hand_features(pts):
 
     return feats
 
+#speech queue stuff
 class SpeechEngine:
     def __init__(self):
         self.speech_queue = queue.Queue()
@@ -169,13 +174,14 @@ class SpeechEngine:
                         
                         pygame.mixer.music.unload()
                     except Exception as e:
-                        print("speech error:", e)
+                        print("speech error bro:", e)
             self.speech_queue.task_done()
 
     def speak(self, text, tone="neutral"):
         if text and str(text).strip():
             self.speech_queue.put((str(text).strip(), self.current_voice_label, tone))
 
+#background thread predicting letters so video stream never lags
 class BackgroundAI:
     def __init__(self, model):
         self.asl_model = model
@@ -183,7 +189,7 @@ class BackgroundAI:
         self.result_lock = threading.Lock()
         
         self.predicted_letter = "-"
-        self.wrist_history = deque(maxlen=15) #remember the last 15 frames of movement
+        self.wrist_history = deque(maxlen=15)
         
         self.running = True
         self.thread = threading.Thread(target=self.run, daemon=True)
@@ -196,34 +202,44 @@ class BackgroundAI:
             except queue.Empty:
                 pass
         self.data_queue.put((features, raw_wrist_x)) 
+
     def run(self):
         prediction_buffer = deque(maxlen=7)
         
         while self.running:
-            item = self.data_queue.get()
+            try:
+                item = self.data_queue.get(timeout=0.1)
+            except queue.Empty:
+                continue
+
             if isinstance(item, tuple):
                 features, raw_wrist_x = item
             else:
                 features, raw_wrist_x = item, None
 
-            local_letter = self.predicted_letter
+            local_letter = "-"
                     
-            if features is not None and self.asl_model:
-                if raw_wrist_x is not None:
-                    self.wrist_history.append(raw_wrist_x) #track movement
-                
-                raw_pred = self.asl_model.predict([features])[0]
-                
-                if raw_pred in ['I', 'J'] and len(self.wrist_history) == 15:
-                    movement = self.wrist_history[0] - self.wrist_history[-1]
-                    if movement > 0.05: #adjust this threshold based on testing
-                        raw_pred = 'J'
-                    else:
-                        raw_pred = 'I'
-                        
-                prediction_buffer.append(raw_pred)
-                local_letter = Counter(prediction_buffer).most_common(1)[0][0]
-            elif features is None:
+            if features is not None and self.asl_model is not None:
+                try:
+                    if raw_wrist_x is not None:
+                        self.wrist_history.append(raw_wrist_x)
+                    
+                    raw_pred = self.asl_model.predict([features])[0]
+                    
+                    if raw_pred in ['I', 'J'] and len(self.wrist_history) == 15:
+                        movement = self.wrist_history[0] - self.wrist_history[-1]
+                        if movement > 0.05:
+                            raw_pred = 'J'
+                        else:
+                            raw_pred = 'I'
+                            
+                    prediction_buffer.append(str(raw_pred))
+                    if prediction_buffer:
+                        local_letter = Counter(prediction_buffer).most_common(1)[0][0]
+                except Exception as e:
+                    print("prediction error fr:", e)
+                    local_letter = "-"
+            else:
                 prediction_buffer.clear()
                 self.wrist_history.clear()
                 local_letter = "-"
@@ -231,6 +247,7 @@ class BackgroundAI:
             with self.result_lock:
                 self.predicted_letter = local_letter
 
+#checking if palm is open 
 def is_open_hand(hand_landmarks):
     fingers_extended = [
         hand_landmarks[8].y < hand_landmarks[6].y,   # index
@@ -241,9 +258,11 @@ def is_open_hand(hand_landmarks):
     thumb_extended = abs(hand_landmarks[4].x - hand_landmarks[17].x) > 0.18
     return all(fingers_extended) and thumb_extended
 
+#two hands open gesture 4 spacebar
 def is_two_open_hands(hand1, hand2):
     return is_open_hand(hand1) and is_open_hand(hand2)
 
+#main loop 
 def main():
     base_options = python.BaseOptions(model_asset_path='hand_landmarker.task')
     options = vision.HandLandmarkerOptions(
@@ -263,7 +282,7 @@ def main():
     time.sleep(1.0)
     
     if not cap.stream.isOpened():
-        print("error: Could not open webcam.")
+        print("error: webcam broken fr")
         return
 
     window_name = "sign language ai - live classifier"
@@ -317,14 +336,12 @@ def main():
             mx, my = mouse_click_pos
             mouse_click_pos = None
 
-            # clear button
             if (w - 140) <= mx <= (w - 20) and 20 <= my <= 55:
                 current_word = ""
                 finished_word = ""
                 selecting_punctuation = False
                 exclamation_sub = False
 
-            # del button
             elif (w - 270) <= mx <= (w - 150) and 20 <= my <= 55:
                 current_word = current_word[:-1]
 
@@ -343,11 +360,9 @@ def main():
                             word_history.append(finished_word)
                             tts.speak(finished_word, selected_tone)
 
-                    # ! -> open sub menu
                     elif (start_x + 240) <= mx <= (start_x + 240 + btn_w) and btn_y1 <= my <= btn_y2:
                         exclamation_sub = True
 
-                    # ?
                     elif (start_x + 480) <= mx <= (start_x + 480 + btn_w) and btn_y1 <= my <= btn_y2:
                         finished_word = current_word.strip() + "?"
                         selected_tone = "surprised"
@@ -356,7 +371,6 @@ def main():
                             word_history.append(finished_word)
                             tts.speak(finished_word, selected_tone)
                 else:
-                    # exclamation sub options: happy vs angry
                     btn_w = 220
                     start_x = cx - 240
 
@@ -381,11 +395,9 @@ def main():
             elif not is_recording and finished_word:
                 btn_y1, btn_y2 = cy + 20, cy + 65
 
-                # re-pronounce
                 if (cx - 305) <= mx <= (cx - 115) and btn_y1 <= my <= btn_y2:
                     tts.speak(finished_word, selected_tone)
 
-                # change punctuation / undo
                 elif (cx - 95) <= mx <= (cx + 95) and btn_y1 <= my <= btn_y2:
                     if word_history and word_history[-1] == finished_word:
                         word_history.pop()
@@ -393,7 +405,6 @@ def main():
                     selecting_punctuation = True
                     exclamation_sub = False
 
-                # restart/new word
                 elif (cx + 115) <= mx <= (cx + 305) and btn_y1 <= my <= btn_y2:
                     finished_word = ""
                     current_word = ""
@@ -464,6 +475,7 @@ def main():
             
             bg_ai.update_data(features, primary_hand[0].x)
 
+            #drawing connections fixed 
             for hand_landmarks in all_hands:
                 for connection in HAND_CONNECTIONS:
                     start_p = (int(hand_landmarks[connection[0]].x * w), int(hand_landmarks[connection[0]].y * h))
@@ -491,19 +503,19 @@ def main():
                 current_holding_letter = predicted_letter
                 letter_hold_start_time = time.time()
 
-        # clear button
+        #clear button ui
         cv2.rectangle(frame, (w - 140, 20), (w - 20, 55), (0, 0, 200), -1)
         cv2.rectangle(frame, (w - 140, 20), (w - 20, 55), (255, 255, 255), 2)
         cv2.putText(frame, "CLEAR", (w - 110, 43), 
                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2, cv2.LINE_AA)
 
-        # delete button
+        #delete button ui
         cv2.rectangle(frame, (w - 270, 20), (w - 150, 55), (0, 100, 200), -1)
         cv2.rectangle(frame, (w - 270, 20), (w - 150, 55), (255, 255, 255), 2)
         cv2.putText(frame, "DELETE", (w - 245, 43), 
                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2, cv2.LINE_AA)
 
-        # controls box
+        #controls overlay
         box_x1, box_y1 = w - 300, 75
         box_x2, box_y2 = w - 20, 240 
         cv2.rectangle(frame, (box_x1, box_y1), (box_x2, box_y2), (30, 30, 30), -1)
@@ -526,7 +538,7 @@ def main():
             cv2.putText(frame, line_text, (box_x1 + 10, y_pos),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.45, text_color, 1, cv2.LINE_AA)
 
-        # left side status
+        #left side status 
         cv2.putText(frame, f"sign: {predicted_letter}", (40, 50), 
                     cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 0), 2, cv2.LINE_AA)
         cv2.putText(frame, f"voice: {tts.current_voice_label}", (40, 90), 
@@ -580,7 +592,7 @@ def main():
             cv2.rectangle(frame, (40, h - 35), (240, h - 20), (100, 100, 100), 2)
             cv2.rectangle(frame, (40, h - 35), (40 + int(200 * progress_ratio), h - 20), (0, 255, 255), -1)
 
-        # punctuation menu modal
+        #punctuation options pop up
         if selecting_punctuation:
             if not exclamation_sub:
                 box_w, box_h = 760, 240
@@ -622,7 +634,6 @@ def main():
                     cv2.putText(frame, desc, (bx1 + (btn_w - d_size[0]) // 2, btn_y1 + 90), 
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.38, (220, 220, 220), 1, cv2.LINE_AA)
             else:
-                # sub menu for !
                 box_w, box_h = 580, 240
                 m_x1, m_y1 = cx - box_w // 2, cy - box_h // 2
                 m_x2, m_y2 = cx + box_w // 2, cy + box_h // 2
@@ -676,21 +687,18 @@ def main():
 
             btn_y1, btn_y2 = cy + 20, cy + 65
 
-            # re-pronounce
             btn1_x1, btn1_x2 = cx - 305, cx - 115
             cv2.rectangle(frame, (btn1_x1, btn_y1), (btn1_x2, btn_y2), (180, 100, 0), -1)
             cv2.rectangle(frame, (btn1_x1, btn_y1), (btn1_x2, btn_y2), (255, 255, 255), 2)
             cv2.putText(frame, "RE-PRONOUNCE", (btn1_x1 + 15, btn_y1 + 28), 
                         cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 2, cv2.LINE_AA)
 
-            # change punctuation / undo
             btn2_x1, btn2_x2 = cx - 95, cx + 95
             cv2.rectangle(frame, (btn2_x1, btn_y1), (btn2_x2, btn_y2), (0, 100, 200), -1)
             cv2.rectangle(frame, (btn2_x1, btn_y1), (btn2_x2, btn_y2), (255, 255, 255), 2)
             cv2.putText(frame, "CHANGE PUNC", (btn2_x1 + 22, btn_y1 + 28), 
                         cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 2, cv2.LINE_AA)
 
-            # restart / new
             btn3_x1, btn3_x2 = cx + 115, cx + 305
             cv2.rectangle(frame, (btn3_x1, btn_y1), (btn3_x2, btn_y2), (0, 140, 0), -1)
             cv2.rectangle(frame, (btn3_x1, btn_y1), (btn3_x2, btn_y2), (255, 255, 255), 2)
