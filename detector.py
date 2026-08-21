@@ -29,7 +29,6 @@ except Exception as e:
     print("asl_word_model.pkl not found (run train_words.py first if needed):", e)
     asl_word_model = None
 
-# hand bones mapping 
 HAND_CONNECTIONS = [
     (0, 1), (1, 2), (2, 3), (3, 4),         # thumb
     (5, 6), (6, 7), (7, 8),                 # index 
@@ -62,6 +61,15 @@ class WebcamVideoStream:
     def stop(self):
         self.stopped = True
         self.stream.release()
+
+def is_valid_hand_shape(landmarks):
+    # Reject detections where wrist-to-middle-mcp distance is unrealistically small/large
+    wrist = np.array([landmarks[0].x, landmarks[0].y])
+    middle_mcp = np.array([landmarks[9].x, landmarks[9].y])
+    palm_size = np.linalg.norm(wrist - middle_mcp)
+    
+    # Palm size should typically take up between 3% and 40% of normalized frame width
+    return 0.03 < palm_size < 0.40
 
 def extract_hand_features(pts):
     pts = np.array(pts)
@@ -264,13 +272,15 @@ def is_two_open_hands(hand1, hand2):
 
 def main():
     base_options = python.BaseOptions(model_asset_path='hand_landmarker.task')
+    
+    # Increased confidence thresholds to prevent false positives like shoulders or elbows
     options = vision.HandLandmarkerOptions(
         base_options=base_options, 
         running_mode=vision.RunningMode.VIDEO, 
         num_hands=2,
-        min_hand_detection_confidence=0.5,
-        min_hand_presence_confidence=0.5,
-        min_tracking_confidence=0.5
+        min_hand_detection_confidence=0.75,
+        min_hand_presence_confidence=0.75,
+        min_tracking_confidence=0.75
     )
     detector = vision.HandLandmarker.create_from_options(options)
     
@@ -437,65 +447,74 @@ def main():
         open_hand = False
 
         if detection_result.hand_landmarks:
-            hand_detected = True
-            all_hands = detection_result.hand_landmarks
-            primary_hand = all_hands[0]
-
-            if len(all_hands) >= 2:
-                space_gesture_detected = is_two_open_hands(all_hands[0], all_hands[1])
-
-            if not space_gesture_detected:
-                open_hand = is_open_hand(primary_hand)
-
-            if is_recording and space_gesture_detected:
-                if space_start_time is None:
-                    space_start_time = time.time()
-                elif (time.time() - space_start_time >= ACTION_GESTURE_DURATION) and not space_triggered:
-                    current_word += " "
-                    space_triggered = True
-            else:
-                space_start_time = None
-                space_triggered = False
-
-            if open_hand and not space_gesture_detected:
-                if open_hand_start_time is None:
-                    open_hand_start_time = time.time()
-                elif (time.time() - open_hand_start_time >= TOGGLE_GESTURE_DURATION) and not open_hand_triggered:
-                    open_hand_triggered = True
-                    is_recording = not is_recording
-                    
-                    if is_recording:
-                        current_word = ""
-                        finished_word = ""
-                        selecting_punctuation = False
-                        exclamation_sub = False
-                        word_sequence_buffer.clear()
-                        last_word_pred_time = 0.0
-                    else:
-                        if current_word.strip():
-                            selecting_punctuation = True
-                            exclamation_sub = False
-                        else:
-                            finished_word = ""
-                    open_hand_start_time = None
-            else:
-                open_hand_start_time = None
-                open_hand_triggered = False
-
-            pts = np.array([[lm.x, lm.y, lm.z] for lm in primary_hand])
-            features = extract_hand_features(pts)
+            # Filter out detections that do not match realistic hand proportions
+            valid_hands = [h for h in detection_result.hand_landmarks if is_valid_hand_shape(h)]
             
-            bg_ai.update_data(features, primary_hand[0].x)
+            if valid_hands:
+                hand_detected = True
+                primary_hand = valid_hands[0]
 
-            for hand_landmarks in all_hands:
-                for connection in HAND_CONNECTIONS:
-                    start_p = (int(hand_landmarks[connection[0]].x * w), int(hand_landmarks[connection[1]].x * h))
-                    end_p = (int(hand_landmarks[connection[1]].x * w), int(hand_landmarks[connection[1]].y * h))
-                    cv2.line(frame, start_p, end_p, (255, 255, 255), 2)
+                if len(valid_hands) >= 2:
+                    space_gesture_detected = is_two_open_hands(valid_hands[0], valid_hands[1])
 
-                for landmark in hand_landmarks:
-                    x, y = int(landmark.x * w), int(landmark.y * h)
-                    cv2.circle(frame, (x, y), 4, (0, 255, 0), -1)
+                if not space_gesture_detected:
+                    open_hand = is_open_hand(primary_hand)
+
+                if is_recording and space_gesture_detected:
+                    if space_start_time is None:
+                        space_start_time = time.time()
+                    elif (time.time() - space_start_time >= ACTION_GESTURE_DURATION) and not space_triggered:
+                        current_word += " "
+                        space_triggered = True
+                else:
+                    space_start_time = None
+                    space_triggered = False
+
+                if open_hand and not space_gesture_detected:
+                    if open_hand_start_time is None:
+                        open_hand_start_time = time.time()
+                    elif (time.time() - open_hand_start_time >= TOGGLE_GESTURE_DURATION) and not open_hand_triggered:
+                        open_hand_triggered = True
+                        is_recording = not is_recording
+                        
+                        if is_recording:
+                            current_word = ""
+                            finished_word = ""
+                            selecting_punctuation = False
+                            exclamation_sub = False
+                            word_sequence_buffer.clear()
+                            last_word_pred_time = 0.0
+                        else:
+                            if current_word.strip():
+                                selecting_punctuation = True
+                                exclamation_sub = False
+                            else:
+                                finished_word = ""
+                        open_hand_start_time = None
+                else:
+                    open_hand_start_time = None
+                    open_hand_triggered = False
+
+                pts = np.array([[lm.x, lm.y, lm.z] for lm in primary_hand])
+                features = extract_hand_features(pts)
+                
+                bg_ai.update_data(features, primary_hand[0].x)
+
+                for hand_landmarks in valid_hands:
+                    for connection in HAND_CONNECTIONS:
+                        start_p = (int(hand_landmarks[connection[0]].x * w), int(hand_landmarks[connection[1]].x * h))
+                        end_p = (int(hand_landmarks[connection[1]].x * w), int(hand_landmarks[connection[1]].y * h))
+                        cv2.line(frame, start_p, end_p, (255, 255, 255), 2)
+
+                    for landmark in hand_landmarks:
+                        x, y = int(landmark.x * w), int(landmark.y * h)
+                        cv2.circle(frame, (x, y), 4, (0, 255, 0), -1)
+            else:
+                bg_ai.update_data(None, None)
+                open_hand_start_time = None
+                space_start_time = None
+                letter_hold_start_time = None
+                current_holding_letter = None
         else:
             bg_ai.update_data(None, None)
             open_hand_start_time = None
