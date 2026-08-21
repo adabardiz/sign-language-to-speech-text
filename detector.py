@@ -15,17 +15,16 @@ from collections import deque, Counter
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
 
-
 try:
     asl_model = joblib.load('asl_model.pkl')
-    print("loaded asl model cooked and ready")
+    print("Loaded ASL alphabet model successfully.")
 except Exception as e:
-    print("error loading alphabet model bro:", e)
+    print("Error loading alphabet model:", e)
     asl_model = None
 
 try:
     asl_word_model = joblib.load('asl_word_model.pkl')
-    print("loaded asl word model cooked and ready")
+    print("Loaded ASL word model successfully.")
 except Exception as e:
     print("asl_word_model.pkl not found (run train_words.py first if needed):", e)
     asl_word_model = None
@@ -39,7 +38,6 @@ HAND_CONNECTIONS = [
     (17, 18), (18, 19), (19, 20),           # pinky
     (0, 5), (5, 9), (9, 13), (13, 17), (0, 17) # palm
 ]
-
 
 class WebcamVideoStream:
     def __init__(self, src=0):
@@ -124,7 +122,6 @@ def extract_hand_features(pts):
 
     return feats
 
-
 class SpeechEngine:
     def __init__(self):
         self.speech_queue = queue.Queue()
@@ -180,7 +177,7 @@ class SpeechEngine:
                         
                         pygame.mixer.music.unload()
                     except Exception as e:
-                        print("speech error bro:", e)
+                        print("Speech engine error:", e)
             self.speech_queue.task_done()
 
     def speak(self, text, tone="neutral"):
@@ -242,7 +239,7 @@ class BackgroundAI:
                     if prediction_buffer:
                         local_letter = Counter(prediction_buffer).most_common(1)[0][0]
                 except Exception as e:
-                    print("prediction error fr:", e)
+                    print("Prediction error:", e)
                     local_letter = "-"
             else:
                 prediction_buffer.clear()
@@ -251,7 +248,6 @@ class BackgroundAI:
 
             with self.result_lock:
                 self.predicted_letter = local_letter
-
 
 def is_open_hand(hand_landmarks):
     fingers_extended = [
@@ -285,7 +281,7 @@ def main():
     time.sleep(1.0)
     
     if not cap.stream.isOpened():
-        print("error: webcam broken fr")
+        print("Error: Could not open webcam.")
         return
 
     window_name = "sign language ai - live classifier"
@@ -301,10 +297,11 @@ def main():
 
     cv2.setMouseCallback(window_name, on_mouse)
 
-    #state variables
-    current_mode = "SPELL" 
+    current_mode = "SPELL"
     word_sequence_buffer = deque(maxlen=30)
-    last_word_pred_time = 0
+    last_word_pred_time = 0.0
+
+    WORD_COOLDOWN_DURATION = 3.0
 
     is_recording = False
     selecting_punctuation = False
@@ -347,6 +344,7 @@ def main():
             if (w - 410) <= mx <= (w - 280) and 20 <= my <= 55:
                 current_mode = "WORD" if current_mode == "SPELL" else "SPELL"
                 word_sequence_buffer.clear()
+                last_word_pred_time = 0.0
 
             elif (w - 140) <= mx <= (w - 20) and 20 <= my <= 55:
                 current_word = ""
@@ -472,6 +470,7 @@ def main():
                         selecting_punctuation = False
                         exclamation_sub = False
                         word_sequence_buffer.clear()
+                        last_word_pred_time = 0.0
                     else:
                         if current_word.strip():
                             selecting_punctuation = True
@@ -488,10 +487,9 @@ def main():
             
             bg_ai.update_data(features, primary_hand[0].x)
 
-            #draw skeleton connections
             for hand_landmarks in all_hands:
                 for connection in HAND_CONNECTIONS:
-                    start_p = (int(hand_landmarks[connection[0]].x * w), int(hand_landmarks[connection[0]].y * h))
+                    start_p = (int(hand_landmarks[connection[0]].x * w), int(hand_landmarks[connection[1]].x * h))
                     end_p = (int(hand_landmarks[connection[1]].x * w), int(hand_landmarks[connection[1]].y * h))
                     cv2.line(frame, start_p, end_p, (255, 255, 255), 2)
 
@@ -505,10 +503,8 @@ def main():
             letter_hold_start_time = None
             current_holding_letter = None
 
-
         if is_recording and not open_hand and not space_gesture_detected and hand_detected:
             if current_mode == "SPELL":
-                #letter by letter holding logic
                 if predicted_letter == current_holding_letter:
                     elapsed = time.time() - letter_hold_start_time
                     if elapsed >= HOLD_LETTER_DURATION:
@@ -520,43 +516,40 @@ def main():
                     letter_hold_start_time = time.time()
 
             elif current_mode == "WORD" and asl_word_model is not None:
-                #dynamic word continuous motion collecting
-                word_sequence_buffer.append(features)
+                if time.time() - last_word_pred_time >= WORD_COOLDOWN_DURATION:
+                    word_sequence_buffer.append(features)
 
-                if len(word_sequence_buffer) == 30 and (time.time() - last_word_pred_time > 1.5):
-                    flat_sequence = np.array(word_sequence_buffer).flatten()
-                    try:
-                        predicted_word = asl_word_model.predict([flat_sequence])[0]
-                        if predicted_word:
-                            current_word += f"{predicted_word} "
-                            tts.speak(predicted_word, tone=selected_tone)
-                    except Exception as e:
-                        print("word prediction error:", e)
+                    if len(word_sequence_buffer) == 30:
+                        flat_sequence = np.array(word_sequence_buffer).flatten()
+                        try:
+                            predicted_word = asl_word_model.predict([flat_sequence])[0]
+                            if predicted_word:
+                                current_word += f"{predicted_word} "
+                                tts.speak(predicted_word, tone=selected_tone)
+                        except Exception as e:
+                            print("Word prediction error:", e)
 
+                        word_sequence_buffer.clear()
+                        last_word_pred_time = time.time()
+                else:
                     word_sequence_buffer.clear()
-                    last_word_pred_time = time.time()
 
-
-        #mode toggle button ui
         mode_color = (0, 165, 255) if current_mode == "SPELL" else (255, 0, 150)
         cv2.rectangle(frame, (w - 410, 20), (w - 280, 55), mode_color, -1)
         cv2.rectangle(frame, (w - 410, 20), (w - 280, 55), (255, 255, 255), 2)
         cv2.putText(frame, f"MODE: {current_mode}", (w - 400, 43), 
                     cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 255), 2, cv2.LINE_AA)
 
-        #clear Button ui
         cv2.rectangle(frame, (w - 140, 20), (w - 20, 55), (0, 0, 200), -1)
         cv2.rectangle(frame, (w - 140, 20), (w - 20, 55), (255, 255, 255), 2)
         cv2.putText(frame, "CLEAR", (w - 110, 43), 
                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2, cv2.LINE_AA)
 
-        #delete Button ui
         cv2.rectangle(frame, (w - 270, 20), (w - 150, 55), (0, 100, 200), -1)
         cv2.rectangle(frame, (w - 270, 20), (w - 150, 55), (255, 255, 255), 2)
         cv2.putText(frame, "DELETE", (w - 245, 43), 
                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2, cv2.LINE_AA)
 
-        #controls Box
         box_x1, box_y1 = w - 300, 75
         box_x2, box_y2 = w - 20, 260 
         cv2.rectangle(frame, (box_x1, box_y1), (box_x2, box_y2), (30, 30, 30), -1)
@@ -580,7 +573,6 @@ def main():
             cv2.putText(frame, line_text, (box_x1 + 10, y_pos),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.42, text_color, 1, cv2.LINE_AA)
 
-        #left side status
         cv2.putText(frame, f"sign: {predicted_letter}", (40, 50), 
                     cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 0), 2, cv2.LINE_AA)
         cv2.putText(frame, f"voice: {tts.current_voice_label}", (40, 90), 
@@ -603,11 +595,20 @@ def main():
                     cv2.rectangle(frame, (40, 215), (40 + int(200 * progress_ratio), 230), (0, 255, 0), -1)
 
             elif current_mode == "WORD":
-                buf_len = len(word_sequence_buffer)
-                cv2.putText(frame, f"capturing word motion ({buf_len}/30)...", (40, 205), 
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 1, cv2.LINE_AA)
-                cv2.rectangle(frame, (40, 215), (240, 230), (100, 100, 100), 2)
-                cv2.rectangle(frame, (40, 215), (40 + int(200 * (buf_len / 30)), 230), (255, 0, 150), -1)
+                cooldown_remaining = WORD_COOLDOWN_DURATION - (time.time() - last_word_pred_time)
+                
+                if cooldown_remaining > 0:
+                    cv2.putText(frame, f"cooldown: {cooldown_remaining:.1f}s...", (40, 205), 
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 165, 255), 2, cv2.LINE_AA)
+                    progress_ratio = 1.0 - (cooldown_remaining / WORD_COOLDOWN_DURATION)
+                    cv2.rectangle(frame, (40, 215), (240, 230), (100, 100, 100), 2)
+                    cv2.rectangle(frame, (40, 215), (40 + int(200 * progress_ratio), 230), (0, 165, 255), -1)
+                else:
+                    buf_len = len(word_sequence_buffer)
+                    cv2.putText(frame, f"capturing word motion ({buf_len}/30)...", (40, 205), 
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 1, cv2.LINE_AA)
+                    cv2.rectangle(frame, (40, 215), (240, 230), (100, 100, 100), 2)
+                    cv2.rectangle(frame, (40, 215), (40 + int(200 * (buf_len / 30)), 230), (255, 0, 150), -1)
 
             if space_start_time:
                 hold_elapsed = min(time.time() - space_start_time, ACTION_GESTURE_DURATION)
@@ -642,7 +643,6 @@ def main():
             cv2.rectangle(frame, (40, h - 35), (240, h - 20), (100, 100, 100), 2)
             cv2.rectangle(frame, (40, h - 35), (40 + int(200 * progress_ratio), h - 20), (0, 255, 255), -1)
 
-        #models for punctuation
         if selecting_punctuation:
             if not exclamation_sub:
                 box_w, box_h = 760, 240
@@ -757,7 +757,6 @@ def main():
 
         cv2.imshow(window_name, frame)
 
-        #keyboard Controls
         key = cv2.waitKey(1) & 0xFF
         if key == ord('q'):
             bg_ai.running = False
@@ -767,6 +766,7 @@ def main():
         elif key == ord('m'):
             current_mode = "WORD" if current_mode == "SPELL" else "SPELL"
             word_sequence_buffer.clear()
+            last_word_pred_time = 0.0
 
     cap.stop()
     cv2.destroyAllWindows()
