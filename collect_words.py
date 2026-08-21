@@ -3,6 +3,7 @@ import numpy as np
 import mediapipe as mp
 import pandas as pd
 import time
+import csv
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
 from train_model import extract_hand_features
@@ -77,6 +78,9 @@ cap.release()
 cv2.destroyAllWindows()
 
 #append data to asl_words.csv
-df = pd.DataFrame(dataset)
-df.to_csv("asl_words.csv", mode='a', header=False, index=False)
+if dataset:
+    with open("asl_words.csv", mode="a", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerows(dataset)
+
 print(f"\nSuccessfully saved {SAMPLES_TO_COLLECT} samples of '{WORD_TO_RECORD}' to asl_words.csv")
