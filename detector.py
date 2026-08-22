@@ -138,6 +138,7 @@ class BackgroundAI:
         self.result_lock = threading.Lock()
         
         self.predicted_letter = "-"
+        self.top_candidates = []
         self.wrist_history = deque(maxlen=15)
         
         self.running = True
@@ -167,13 +168,34 @@ class BackgroundAI:
                 features, raw_wrist_x = item, None
 
             local_letter = "-"
+            local_top_candidates = []
                     
             if features is not None and self.asl_model is not None:
                 try:
                     if raw_wrist_x is not None:
                         self.wrist_history.append(raw_wrist_x)
                     
-                    raw_pred = self.asl_model.predict([features[:123]])[0]
+                    if hasattr(self.asl_model, "predict_proba"):
+                        probs = self.asl_model.predict_proba([features[:123]])[0]
+                        classes = self.asl_model.classes_
+                        top_idx = np.argsort(probs)[::-1][:2]
+                        
+                        raw_pred = classes[top_idx[0]]
+                        p1, p2 = probs[top_idx[0]], probs[top_idx[1]]
+                        
+                        total_p = p1 + p2
+                        if total_p > 0:
+                            c1, c2 = p1 / total_p, p2 / total_p
+                        else:
+                            c1, c2 = 0.5, 0.5
+
+                        local_top_candidates = [
+                            (str(classes[top_idx[0]]), c1),
+                            (str(classes[top_idx[1]]), c2)
+                        ]
+                    else:
+                        raw_pred = self.asl_model.predict([features[:123]])[0]
+                        local_top_candidates = [(str(raw_pred), 1.0)]
                     
                     if raw_pred in ['I', 'J'] and len(self.wrist_history) == 15:
                         movement = self.wrist_history[0] - self.wrist_history[-1]
@@ -188,22 +210,36 @@ class BackgroundAI:
                 except Exception as e:
                     print("Prediction error:", e)
                     local_letter = "-"
+                    local_top_candidates = []
             else:
                 prediction_buffer.clear()
                 self.wrist_history.clear()
                 local_letter = "-"
+                local_top_candidates = []
 
             with self.result_lock:
                 self.predicted_letter = local_letter
+                self.top_candidates = local_top_candidates
 
 def is_open_hand(hand_landmarks):
+    #dynamic finger extension checks relative to joint positions
     fingers_extended = [
         hand_landmarks[8].y < hand_landmarks[6].y,   # index
         hand_landmarks[12].y < hand_landmarks[10].y, # middle
         hand_landmarks[16].y < hand_landmarks[14].y, # ring
         hand_landmarks[20].y < hand_landmarks[18].y  # pinky
     ]
-    thumb_extended = abs(hand_landmarks[4].x - hand_landmarks[17].x) > 0.18
+    #scale thumb threshold dynamically relative to palm width
+    palm_width = np.linalg.norm(
+        np.array([hand_landmarks[5].x, hand_landmarks[5].y]) - 
+        np.array([hand_landmarks[17].x, hand_landmarks[17].y])
+    )
+    thumb_dist = np.linalg.norm(
+        np.array([hand_landmarks[4].x, hand_landmarks[4].y]) - 
+        np.array([hand_landmarks[17].x, hand_landmarks[17].y])
+    )
+    thumb_extended = thumb_dist > (palm_width * 0.85)
+    
     return all(fingers_extended) and thumb_extended
 
 def is_two_open_hands(hand1, hand2):
@@ -256,6 +292,11 @@ def main():
     exclamation_sub = False
     selected_tone = "neutral"
 
+    disambiguation_active = False
+    disambig_candidates = ("", "")
+    disambig_selected = ""
+    awaiting_confirmation = False
+
     current_word = ""
     finished_word = ""
     word_history = []
@@ -286,11 +327,48 @@ def main():
         h, w, _ = frame.shape
         cx, cy = w // 2, h // 2
 
+        with bg_ai.result_lock:
+            predicted_letter = bg_ai.predicted_letter
+            top_candidates = bg_ai.top_candidates
+
+        #triggers if top 2 candidates both cross high relative confidence
+        if is_recording and not disambiguation_active and len(top_candidates) >= 2:
+            (cand1, conf1), (cand2, conf2) = top_candidates[0], top_candidates[1]
+            if conf1 >= 0.45 and conf2 >= 0.45 and cand1 != cand2:
+                disambiguation_active = True
+                disambig_candidates = (cand1, cand2)
+                awaiting_confirmation = False
+                disambig_selected = ""
+
         if mouse_click_pos is not None:
             mx, my = mouse_click_pos
             mouse_click_pos = None
 
-            if (w - 410) <= mx <= (w - 280) and 20 <= my <= 55:
+            if disambiguation_active:
+                if not awaiting_confirmation:
+                    btn_y1, btn_y2 = cy - 20, cy + 70
+                    if (cx - 240) <= mx <= (cx - 20) and btn_y1 <= my <= btn_y2:
+                        disambig_selected = disambig_candidates[0]
+                        awaiting_confirmation = True
+                    elif (cx + 20) <= mx <= (cx + 240) and btn_y1 <= my <= btn_y2:
+                        disambig_selected = disambig_candidates[1]
+                        awaiting_confirmation = True
+                    elif (cx - 100) <= mx <= (cx + 100) and (cy + 85) <= my <= (cy + 120):
+                        disambiguation_active = False
+                else:
+                    btn_y1, btn_y2 = cy + 20, cy + 70
+                    if (cx - 210) <= mx <= (cx - 10) and btn_y1 <= my <= btn_y2:
+                        current_word += disambig_selected
+                        tts.speak(disambig_selected, tone="neutral")
+                        disambiguation_active = False
+                        awaiting_confirmation = False
+                        disambig_selected = ""
+                    elif (cx + 10) <= mx <= (cx + 210) and btn_y1 <= my <= btn_y2:
+                        disambiguation_active = False
+                        awaiting_confirmation = False
+                        disambig_selected = ""
+
+            elif (w - 410) <= mx <= (w - 280) and 20 <= my <= 55:
                 current_mode = "WORD" if current_mode == "SPELL" else "SPELL"
                 word_sequence_buffer.clear()
                 last_word_pred_time = 0.0
@@ -368,9 +446,6 @@ def main():
                     finished_word = ""
                     current_word = ""
 
-        with bg_ai.result_lock:
-            predicted_letter = bg_ai.predicted_letter
-
         rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb_frame)
         
@@ -392,7 +467,6 @@ def main():
                 hand_detected = True
                 primary_hand = valid_hands[0]
 
-                # Hand stability tracking to prevent dynamic signs (e.g. THANK YOU) from triggering finish
                 curr_wrist = np.array([primary_hand[0].x, primary_hand[0].y])
                 if prev_wrist_pos is not None:
                     hand_movement = np.linalg.norm(curr_wrist - prev_wrist_pos)
@@ -406,7 +480,7 @@ def main():
                 if not space_gesture_detected:
                     open_hand = is_open_hand(primary_hand)
 
-                if is_recording and space_gesture_detected:
+                if is_recording and space_gesture_detected and not disambiguation_active:
                     if space_start_time is None:
                         space_start_time = time.time()
                     elif (time.time() - space_start_time >= ACTION_GESTURE_DURATION) and not space_triggered:
@@ -416,8 +490,7 @@ def main():
                     space_start_time = None
                     space_triggered = False
 
-                # Require hand to be stationary (< 0.012 movement) to count as control toggle
-                if open_hand and not space_gesture_detected and hand_movement < 0.012:
+                if open_hand and not space_gesture_detected and hand_movement < 0.035 and not disambiguation_active:
                     if open_hand_start_time is None:
                         open_hand_start_time = time.time()
                     elif (time.time() - open_hand_start_time >= TOGGLE_GESTURE_DURATION) and not open_hand_triggered:
@@ -471,7 +544,7 @@ def main():
             current_holding_letter = None
             prev_wrist_pos = None
 
-        if is_recording and not open_hand and not space_gesture_detected and hand_detected:
+        if is_recording and not open_hand and not space_gesture_detected and hand_detected and not disambiguation_active:
             if current_mode == "SPELL":
                 if predicted_letter == current_holding_letter:
                     elapsed = time.time() - letter_hold_start_time
@@ -551,56 +624,56 @@ def main():
                         cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2, cv2.LINE_AA)
             cv2.putText(frame, f"word: {current_word}_", (40, 170), 
                         cv2.FONT_HERSHEY_SIMPLEX, 1.1, (255, 0, 255), 3, cv2.LINE_AA)
-            
-            if current_mode == "SPELL":
-                if current_holding_letter and letter_hold_start_time and not open_hand_start_time and not space_gesture_detected:
-                    hold_elapsed = min(time.time() - letter_hold_start_time, HOLD_LETTER_DURATION)
-                    progress_ratio = hold_elapsed / HOLD_LETTER_DURATION
-                    
-                    cv2.putText(frame, f"holding '{current_holding_letter}'...", (40, 205), 
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 1, cv2.LINE_AA)
-                    cv2.rectangle(frame, (40, 215), (240, 230), (100, 100, 100), 2)
-                    cv2.rectangle(frame, (40, 215), (40 + int(200 * progress_ratio), 230), (0, 255, 0), -1)
 
-            elif current_mode == "WORD":
-                cooldown_remaining = WORD_COOLDOWN_DURATION - (time.time() - last_word_pred_time)
-                
-                if cooldown_remaining > 0:
-                    cv2.putText(frame, f"cooldown: {cooldown_remaining:.1f}s...", (40, 205), 
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 165, 255), 2, cv2.LINE_AA)
-                    progress_ratio = 1.0 - (cooldown_remaining / WORD_COOLDOWN_DURATION)
-                    cv2.rectangle(frame, (40, 215), (240, 230), (100, 100, 100), 2)
-                    cv2.rectangle(frame, (40, 215), (40 + int(200 * progress_ratio), 230), (0, 165, 255), -1)
-                else:
-                    buf_len = len(word_sequence_buffer)
-                    cv2.putText(frame, f"capturing word motion ({buf_len}/30)...", (40, 205), 
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 1, cv2.LINE_AA)
-                    cv2.rectangle(frame, (40, 215), (240, 230), (100, 100, 100), 2)
-                    cv2.rectangle(frame, (40, 215), (40 + int(200 * (buf_len / 30)), 230), (255, 0, 150), -1)
+        if disambiguation_active:
+            box_w, box_h = 600, 260
+            m_x1, m_y1 = cx - box_w // 2, cy - box_h // 2
+            m_x2, m_y2 = cx + box_w // 2, cy + box_h // 2
 
-            if space_start_time:
-                hold_elapsed = min(time.time() - space_start_time, ACTION_GESTURE_DURATION)
-                progress_ratio = hold_elapsed / ACTION_GESTURE_DURATION
-                cv2.putText(frame, "adding space...", (40, h - 100), 
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 0), 2, cv2.LINE_AA)
-                cv2.rectangle(frame, (40, h - 85), (240, h - 70), (100, 100, 100), 2)
-                cv2.rectangle(frame, (40, h - 85), (40 + int(200 * progress_ratio), h - 70), (255, 255, 0), -1)
+            cv2.rectangle(frame, (m_x1, m_y1), (m_x2, m_y2), (20, 20, 20), -1)
+            cv2.rectangle(frame, (m_x1, m_y1), (m_x2, m_y2), (0, 215, 255), 2)
 
-        if word_history:
-            hist_x1, hist_y1 = 40, 250
-            hist_w, hist_h = 320, 150
-            cv2.rectangle(frame, (hist_x1, hist_y1), (hist_x1 + hist_w, hist_y1 + hist_h), (30, 30, 30), -1)
-            cv2.rectangle(frame, (hist_x1, hist_y1), (hist_x1 + hist_w, hist_y1 + hist_h), (255, 255, 255), 1)
-            
-            cv2.putText(frame, "past words history:", (hist_x1 + 12, hist_y1 + 25),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 255, 255), 1, cv2.LINE_AA)
-            
-            recent_words = word_history[-4:]
-            for idx_word, w_text in enumerate(recent_words):
-                word_num = len(word_history) - len(recent_words) + idx_word + 1
-                cv2.putText(frame, f"{word_num}. {w_text}", 
-                            (hist_x1 + 15, hist_y1 + 55 + (idx_word * 24)),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (220, 220, 220), 1, cv2.LINE_AA)
+            if not awaiting_confirmation:
+                title = "Algorithm confused! Did you mean:"
+                t_size = cv2.getTextSize(title, cv2.FONT_HERSHEY_SIMPLEX, 0.8, 2)[0]
+                cv2.putText(frame, title, (cx - t_size[0] // 2, cy - 65), 
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 215, 255), 2, cv2.LINE_AA)
+
+                btn_w, btn_h = 220, 90
+                btn_y1 = cy - 20
+
+                c1_text = disambig_candidates[0]
+                cv2.rectangle(frame, (cx - 240, btn_y1), (cx - 20, btn_y1 + btn_h), (180, 100, 0), -1)
+                cv2.rectangle(frame, (cx - 240, btn_y1), (cx - 20, btn_y1 + btn_h), (255, 255, 255), 2)
+                cv2.putText(frame, c1_text, (cx - 140, btn_y1 + 55), 
+                            cv2.FONT_HERSHEY_SIMPLEX, 1.2, (255, 255, 255), 3, cv2.LINE_AA)
+
+                c2_text = disambig_candidates[1]
+                cv2.rectangle(frame, (cx + 20, btn_y1), (cx + 240, btn_y1 + btn_h), (0, 140, 200), -1)
+                cv2.rectangle(frame, (cx + 20, btn_y1), (cx + 240, btn_y1 + btn_h), (255, 255, 255), 2)
+                cv2.putText(frame, c2_text, (cx + 120, btn_y1 + 55), 
+                            cv2.FONT_HERSHEY_SIMPLEX, 1.2, (255, 255, 255), 3, cv2.LINE_AA)
+
+                cv2.rectangle(frame, (cx - 100, cy + 85), (cx + 100, cy + 120), (80, 80, 80), -1)
+                cv2.putText(frame, "DISMISS", (cx - 45, cy + 108), 
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
+            else:
+                title = f"Are you sure you want to add '{disambig_selected}'?"
+                t_size = cv2.getTextSize(title, cv2.FONT_HERSHEY_SIMPLEX, 0.75, 2)[0]
+                cv2.putText(frame, title, (cx - t_size[0] // 2, cy - 30), 
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.75, (255, 255, 255), 2, cv2.LINE_AA)
+
+                btn_y1, btn_y2 = cy + 20, cy + 70
+
+                cv2.rectangle(frame, (cx - 210, btn_y1), (cx - 10, btn_y2), (0, 160, 0), -1)
+                cv2.rectangle(frame, (cx - 210, btn_y1), (cx - 10, btn_y2), (255, 255, 255), 2)
+                cv2.putText(frame, "YES, ADD IT", (cx - 170, btn_y1 + 32), 
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 2, cv2.LINE_AA)
+
+                cv2.rectangle(frame, (cx + 10, btn_y1), (cx + 210, btn_y2), (0, 0, 180), -1)
+                cv2.rectangle(frame, (cx + 10, btn_y1), (cx + 210, btn_y2), (255, 255, 255), 2)
+                cv2.putText(frame, "CANCEL", (cx + 70, btn_y1 + 32), 
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 2, cv2.LINE_AA)
 
         if open_hand_start_time:
             hold_elapsed = min(time.time() - open_hand_start_time, TOGGLE_GESTURE_DURATION)
@@ -610,118 +683,6 @@ def main():
                         cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2, cv2.LINE_AA)
             cv2.rectangle(frame, (40, h - 35), (240, h - 20), (100, 100, 100), 2)
             cv2.rectangle(frame, (40, h - 35), (40 + int(200 * progress_ratio), h - 20), (0, 255, 255), -1)
-
-        if selecting_punctuation:
-            if not exclamation_sub:
-                box_w, box_h = 760, 240
-                m_x1, m_y1 = cx - box_w // 2, cy - box_h // 2
-                m_x2, m_y2 = cx + box_w // 2, cy + box_h // 2
-
-                cv2.rectangle(frame, (m_x1, m_y1), (m_x2, m_y2), (20, 20, 20), -1)
-                cv2.rectangle(frame, (m_x1, m_y1), (m_x2, m_y2), (0, 255, 255), 2)
-
-                title = f"which punctuation? (Word: '{current_word.strip()}')"
-                t_size = cv2.getTextSize(title, cv2.FONT_HERSHEY_SIMPLEX, 0.75, 2)[0]
-                cv2.putText(frame, title, (cx - t_size[0] // 2, cy - 65), 
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.75, (0, 255, 255), 2, cv2.LINE_AA)
-
-                p_options = [
-                    (".", "neutral", "standard voice", (150, 150, 150)),
-                    ("!", "exclamation", "happy or angry?", (200, 100, 0)),
-                    ("?", "question", "surprised voice", (0, 200, 255))
-                ]
-
-                btn_w, btn_h = 200, 110
-                start_x = cx - 320
-                btn_y1 = cy - 10
-
-                for idx, (sym, label, desc, bg_color) in enumerate(p_options):
-                    bx1 = start_x + (idx * 240)
-                    bx2 = bx1 + btn_w
-                    by2 = btn_y1 + btn_h
-
-                    cv2.rectangle(frame, (bx1, btn_y1), (bx2, by2), bg_color, -1)
-                    cv2.rectangle(frame, (bx1, btn_y1), (bx2, by2), (255, 255, 255), 2)
-
-                    cv2.putText(frame, sym, (bx1 + 90, btn_y1 + 35), 
-                                cv2.FONT_HERSHEY_SIMPLEX, 1.1, (255, 255, 255), 3, cv2.LINE_AA)
-                    l_size = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 2)[0]
-                    cv2.putText(frame, label, (bx1 + (btn_w - l_size[0]) // 2, btn_y1 + 65), 
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2, cv2.LINE_AA)
-                    d_size = cv2.getTextSize(desc, cv2.FONT_HERSHEY_SIMPLEX, 0.38, 1)[0]
-                    cv2.putText(frame, desc, (bx1 + (btn_w - d_size[0]) // 2, btn_y1 + 90), 
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.38, (220, 220, 220), 1, cv2.LINE_AA)
-            else:
-                box_w, box_h = 580, 240
-                m_x1, m_y1 = cx - box_w // 2, cy - box_h // 2
-                m_x2, m_y2 = cx + box_w // 2, cy + box_h // 2
-
-                cv2.rectangle(frame, (m_x1, m_y1), (m_x2, m_y2), (20, 20, 20), -1)
-                cv2.rectangle(frame, (m_x1, m_y1), (m_x2, m_y2), (0, 200, 255), 2)
-
-                title = "is this exclamation happy or angry?"
-                t_size = cv2.getTextSize(title, cv2.FONT_HERSHEY_SIMPLEX, 0.75, 2)[0]
-                cv2.putText(frame, title, (cx - t_size[0] // 2, cy - 65), 
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.75, (0, 255, 255), 2, cv2.LINE_AA)
-
-                sub_options = [
-                    ("!", "happy !", "high pitch cheerful", (0, 180, 0)),
-                    ("!", "angry !", "intense pitch", (0, 0, 200))
-                ]
-
-                btn_w, btn_h = 220, 110
-                start_x = cx - 240
-                btn_y1 = cy - 10
-
-                for idx, (sym, label, desc, bg_color) in enumerate(sub_options):
-                    bx1 = start_x + (idx * 260)
-                    bx2 = bx1 + btn_w
-                    by2 = btn_y1 + btn_h
-
-                    cv2.rectangle(frame, (bx1, btn_y1), (bx2, by2), bg_color, -1)
-                    cv2.rectangle(frame, (bx1, btn_y1), (bx2, by2), (255, 255, 255), 2)
-
-                    cv2.putText(frame, sym, (bx1 + 100, btn_y1 + 35), 
-                                cv2.FONT_HERSHEY_SIMPLEX, 1.1, (255, 255, 255), 3, cv2.LINE_AA)
-                    l_size = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 2)[0]
-                    cv2.putText(frame, label, (bx1 + (btn_w - l_size[0]) // 2, btn_y1 + 65), 
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 2, cv2.LINE_AA)
-                    d_size = cv2.getTextSize(desc, cv2.FONT_HERSHEY_SIMPLEX, 0.38, 1)[0]
-                    cv2.putText(frame, desc, (bx1 + (btn_w - d_size[0]) // 2, btn_y1 + 90), 
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.38, (220, 220, 220), 1, cv2.LINE_AA)
-
-        elif not is_recording and finished_word:
-            box_w, box_h = 660, 180
-            modal_x1, modal_y1 = cx - box_w // 2, cy - box_h // 2
-            modal_x2, modal_y2 = cx + box_w // 2, cy + box_h // 2
-
-            cv2.rectangle(frame, (modal_x1, modal_y1), (modal_x2, modal_y2), (20, 20, 20), -1)
-            cv2.rectangle(frame, (modal_x1, modal_y1), (modal_x2, modal_y2), (0, 255, 0), 2)
-
-            text = f"FINAL WORD: {finished_word}"
-            text_size = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 1.0, 2)[0]
-            cv2.putText(frame, text, (cx - text_size[0] // 2, cy - 20), 
-                        cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 0), 2, cv2.LINE_AA)
-
-            btn_y1, btn_y2 = cy + 20, cy + 65
-
-            btn1_x1, btn1_x2 = cx - 305, cx - 115
-            cv2.rectangle(frame, (btn1_x1, btn_y1), (btn1_x2, btn_y2), (180, 100, 0), -1)
-            cv2.rectangle(frame, (btn1_x1, btn_y1), (btn1_x2, btn_y2), (255, 255, 255), 2)
-            cv2.putText(frame, "RE-PRONOUNCE", (btn1_x1 + 15, btn_y1 + 28), 
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 2, cv2.LINE_AA)
-
-            btn2_x1, btn2_x2 = cx - 95, cx + 95
-            cv2.rectangle(frame, (btn2_x1, btn_y1), (btn2_x2, btn_y2), (0, 100, 200), -1)
-            cv2.rectangle(frame, (btn2_x1, btn_y1), (btn2_x2, btn_y2), (255, 255, 255), 2)
-            cv2.putText(frame, "CHANGE PUNC", (btn2_x1 + 22, btn_y1 + 28), 
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 2, cv2.LINE_AA)
-
-            btn3_x1, btn3_x2 = cx + 115, cx + 305
-            cv2.rectangle(frame, (btn3_x1, btn_y1), (btn3_x2, btn_y2), (0, 140, 0), -1)
-            cv2.rectangle(frame, (btn3_x1, btn_y1), (btn3_x2, btn_y2), (255, 255, 255), 2)
-            cv2.putText(frame, "RESTART / NEW", (btn3_x1 + 12, btn_y1 + 28), 
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 2, cv2.LINE_AA)
 
         cv2.imshow(window_name, frame)
 
