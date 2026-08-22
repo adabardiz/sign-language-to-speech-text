@@ -11,6 +11,7 @@ import asyncio
 import edge_tts
 import pygame
 from collections import deque, Counter
+from train_model import extract_hand_features
 
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
@@ -23,7 +24,7 @@ except Exception as e:
     asl_model = None
 
 try:
-    asl_word_model = joblib.load('asl_word_model.pkl')
+    asl_word_model = joblib.load('asl_word_model.pkl', mmap_mode=None)
     print("Loaded ASL word model successfully.")
 except Exception as e:
     print("asl_word_model.pkl not found (run train_words.py first if needed):", e)
@@ -63,72 +64,11 @@ class WebcamVideoStream:
         self.stream.release()
 
 def is_valid_hand_shape(landmarks):
-    # Reject detections where wrist-to-middle-mcp distance is unrealistically small/large
     wrist = np.array([landmarks[0].x, landmarks[0].y])
     middle_mcp = np.array([landmarks[9].x, landmarks[9].y])
     palm_size = np.linalg.norm(wrist - middle_mcp)
     
-    # Palm size should typically take up between 3% and 40% of normalized frame width
     return 0.03 < palm_size < 0.40
-
-def extract_hand_features(pts):
-    pts = np.array(pts)
-    wrist = pts[0]
-    rel_pts = pts - wrist
-    
-    scale = np.linalg.norm(rel_pts[9])
-    if scale == 0: 
-        scale = 1e-6
-    norm_pts = rel_pts / scale
-    
-    feats = norm_pts.flatten().tolist()
-    
-    for i in range(1, 21):
-        feats.append(float(np.linalg.norm(norm_pts[i])))
-        
-    tips = [4, 8, 12, 16, 20]
-    for i in range(len(tips)):
-        for j in range(i + 1, len(tips)):
-            feats.append(float(np.linalg.norm(norm_pts[tips[i]] - norm_pts[tips[j]])))
-            
-    mcps = [2, 5, 9, 13, 17]
-    for tip in tips:
-        for mcp in mcps:
-            feats.append(float(np.linalg.norm(norm_pts[tip] - norm_pts[mcp])))
-
-    finger_chains = [
-        [1, 2, 3, 4],     # thumb
-        [5, 6, 7, 8],     # index
-        [9, 10, 11, 12],  # middle
-        [13, 14, 15, 16], # ring
-        [17, 18, 19, 20]  # pinky
-    ]
-    for chain in finger_chains:
-        v1 = norm_pts[chain[1]] - norm_pts[chain[0]]
-        v2 = norm_pts[chain[3]] - norm_pts[chain[2]]
-        norm_v1 = np.linalg.norm(v1)
-        norm_v2 = np.linalg.norm(v2)
-        if norm_v1 > 0 and norm_v2 > 0:
-            cos_angle = np.dot(v1, v2) / (norm_v1 * norm_v2)
-            feats.append(float(np.clip(cos_angle, -1.0, 1.0)))
-        else:
-            feats.append(0.0)
-
-    v_index = norm_pts[8] - norm_pts[5]
-    v_middle = norm_pts[12] - norm_pts[9]
-    norm_idx = np.linalg.norm(v_index)
-    norm_mid = np.linalg.norm(v_middle)
-    
-    if norm_idx > 0 and norm_mid > 0:
-        ru_angle = np.dot(v_index, v_middle) / (norm_idx * norm_mid)
-        feats.append(float(ru_angle))
-    else:
-        feats.append(0.0)
-
-    feats.append(float(np.linalg.norm(norm_pts[4] - norm_pts[6])))
-    feats.append(float(np.linalg.norm(norm_pts[4] - norm_pts[10])))
-
-    return feats
 
 class SpeechEngine:
     def __init__(self):
@@ -234,7 +174,8 @@ class BackgroundAI:
                     if raw_wrist_x is not None:
                         self.wrist_history.append(raw_wrist_x)
                     
-                    raw_pred = self.asl_model.predict([features])[0]
+                    # Slicing features to 123 to match alphabet model inputs
+                    raw_pred = self.asl_model.predict([features[:123]])[0]
                     
                     if raw_pred in ['I', 'J'] and len(self.wrist_history) == 15:
                         movement = self.wrist_history[0] - self.wrist_history[-1]
@@ -273,7 +214,6 @@ def is_two_open_hands(hand1, hand2):
 def main():
     base_options = python.BaseOptions(model_asset_path='hand_landmarker.task')
     
-    # Increased confidence thresholds to prevent false positives like shoulders or elbows
     options = vision.HandLandmarkerOptions(
         base_options=base_options, 
         running_mode=vision.RunningMode.VIDEO, 
@@ -447,7 +387,6 @@ def main():
         open_hand = False
 
         if detection_result.hand_landmarks:
-            # Filter out detections that do not match realistic hand proportions
             valid_hands = [h for h in detection_result.hand_landmarks if is_valid_hand_shape(h)]
             
             if valid_hands:
@@ -502,7 +441,7 @@ def main():
 
                 for hand_landmarks in valid_hands:
                     for connection in HAND_CONNECTIONS:
-                        start_p = (int(hand_landmarks[connection[0]].x * w), int(hand_landmarks[connection[1]].x * h))
+                        start_p = (int(hand_landmarks[connection[0]].x * w), int(hand_landmarks[connection[0]].y * h))
                         end_p = (int(hand_landmarks[connection[1]].x * w), int(hand_landmarks[connection[1]].y * h))
                         cv2.line(frame, start_p, end_p, (255, 255, 255), 2)
 
