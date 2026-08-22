@@ -67,7 +67,6 @@ def is_valid_hand_shape(landmarks):
     wrist = np.array([landmarks[0].x, landmarks[0].y])
     middle_mcp = np.array([landmarks[9].x, landmarks[9].y])
     palm_size = np.linalg.norm(wrist - middle_mcp)
-    
     return 0.03 < palm_size < 0.40
 
 class SpeechEngine:
@@ -174,7 +173,6 @@ class BackgroundAI:
                     if raw_wrist_x is not None:
                         self.wrist_history.append(raw_wrist_x)
                     
-                    # Slicing features to 123 to match alphabet model inputs
                     raw_pred = self.asl_model.predict([features[:123]])[0]
                     
                     if raw_pred in ['I', 'J'] and len(self.wrist_history) == 15:
@@ -270,6 +268,7 @@ def main():
 
     letter_hold_start_time = None
     current_holding_letter = None
+    prev_wrist_pos = None
 
     HOLD_LETTER_DURATION = 2.0 
     TOGGLE_GESTURE_DURATION = 1.2 
@@ -393,6 +392,14 @@ def main():
                 hand_detected = True
                 primary_hand = valid_hands[0]
 
+                # Hand stability tracking to prevent dynamic signs (e.g. THANK YOU) from triggering finish
+                curr_wrist = np.array([primary_hand[0].x, primary_hand[0].y])
+                if prev_wrist_pos is not None:
+                    hand_movement = np.linalg.norm(curr_wrist - prev_wrist_pos)
+                else:
+                    hand_movement = 0.0
+                prev_wrist_pos = curr_wrist
+
                 if len(valid_hands) >= 2:
                     space_gesture_detected = is_two_open_hands(valid_hands[0], valid_hands[1])
 
@@ -409,7 +416,8 @@ def main():
                     space_start_time = None
                     space_triggered = False
 
-                if open_hand and not space_gesture_detected:
+                # Require hand to be stationary (< 0.012 movement) to count as control toggle
+                if open_hand and not space_gesture_detected and hand_movement < 0.012:
                     if open_hand_start_time is None:
                         open_hand_start_time = time.time()
                     elif (time.time() - open_hand_start_time >= TOGGLE_GESTURE_DURATION) and not open_hand_triggered:
@@ -454,12 +462,14 @@ def main():
                 space_start_time = None
                 letter_hold_start_time = None
                 current_holding_letter = None
+                prev_wrist_pos = None
         else:
             bg_ai.update_data(None, None)
             open_hand_start_time = None
             space_start_time = None
             letter_hold_start_time = None
             current_holding_letter = None
+            prev_wrist_pos = None
 
         if is_recording and not open_hand and not space_gesture_detected and hand_detected:
             if current_mode == "SPELL":
@@ -516,7 +526,7 @@ def main():
         instructions = [
             "CONTROLS:",
             "Toggle Mode: Click MODE or press 'm'",
-            "Start/Finish: Hold 1 open palm up",
+            "Start/Finish: Hold STILL open palm up",
             "Space: Hold 2 open palms facing screen",
             "Delete: Click 'DELETE' button",
             "Clear All: Click 'CLEAR' button",
@@ -718,16 +728,15 @@ def main():
         key = cv2.waitKey(1) & 0xFF
         if key == ord('q'):
             bg_ai.running = False
+            cap.stop()
+            cv2.destroyAllWindows()
             break
-        elif key == ord('v'):
-            tts.toggle_voice()
         elif key == ord('m'):
             current_mode = "WORD" if current_mode == "SPELL" else "SPELL"
             word_sequence_buffer.clear()
             last_word_pred_time = 0.0
-
-    cap.stop()
-    cv2.destroyAllWindows()
+        elif key == ord('v'):
+            tts.toggle_voice()
 
 if __name__ == "__main__":
     main()
