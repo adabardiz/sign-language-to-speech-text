@@ -222,23 +222,22 @@ class BackgroundAI:
                 self.top_candidates = local_top_candidates
 
 def is_open_hand(hand_landmarks):
-    #dynamic finger extension checks relative to joint positions
     fingers_extended = [
         hand_landmarks[8].y < hand_landmarks[6].y,   # index
         hand_landmarks[12].y < hand_landmarks[10].y, # middle
         hand_landmarks[16].y < hand_landmarks[14].y, # ring
         hand_landmarks[20].y < hand_landmarks[18].y  # pinky
     ]
-    #scale thumb threshold dynamically relative to palm width
-    palm_width = np.linalg.norm(
-        np.array([hand_landmarks[5].x, hand_landmarks[5].y]) - 
-        np.array([hand_landmarks[17].x, hand_landmarks[17].y])
-    )
-    thumb_dist = np.linalg.norm(
-        np.array([hand_landmarks[4].x, hand_landmarks[4].y]) - 
-        np.array([hand_landmarks[17].x, hand_landmarks[17].y])
-    )
-    thumb_extended = thumb_dist > (palm_width * 0.85)
+    
+    #flexible thumb extension check
+    thumb_tip = np.array([hand_landmarks[4].x, hand_landmarks[4].y])
+    pinky_mcp = np.array([hand_landmarks[17].x, hand_landmarks[17].y])
+    wrist = np.array([hand_landmarks[0].x, hand_landmarks[0].y])
+    
+    thumb_dist = np.linalg.norm(thumb_tip - pinky_mcp)
+    hand_scale = np.linalg.norm(wrist - pinky_mcp)
+    
+    thumb_extended = (thumb_dist > hand_scale * 0.7) or (hand_landmarks[4].y < hand_landmarks[2].y)
     
     return all(fingers_extended) and thumb_extended
 
@@ -252,9 +251,9 @@ def main():
         base_options=base_options, 
         running_mode=vision.RunningMode.VIDEO, 
         num_hands=2,
-        min_hand_detection_confidence=0.75,
-        min_hand_presence_confidence=0.75,
-        min_tracking_confidence=0.75
+        min_hand_detection_confidence=0.55,
+        min_hand_presence_confidence=0.55,
+        min_tracking_confidence=0.55
     )
     detector = vision.HandLandmarker.create_from_options(options)
     
@@ -331,7 +330,6 @@ def main():
             predicted_letter = bg_ai.predicted_letter
             top_candidates = bg_ai.top_candidates
 
-        #triggers if top 2 candidates both cross high relative confidence
         if is_recording and not disambiguation_active and len(top_candidates) >= 2:
             (cand1, conf1), (cand2, conf2) = top_candidates[0], top_candidates[1]
             if conf1 >= 0.45 and conf2 >= 0.45 and cand1 != cand2:
@@ -574,6 +572,9 @@ def main():
                         last_word_pred_time = time.time()
                 else:
                     word_sequence_buffer.clear()
+        else:
+            letter_hold_start_time = None
+            current_holding_letter = None
 
         mode_color = (0, 165, 255) if current_mode == "SPELL" else (255, 0, 150)
         cv2.rectangle(frame, (w - 410, 20), (w - 280, 55), mode_color, -1)
@@ -675,14 +676,39 @@ def main():
                 cv2.putText(frame, "CANCEL", (cx + 70, btn_y1 + 32), 
                             cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 2, cv2.LINE_AA)
 
+        #bottom pbs
         if open_hand_start_time:
             hold_elapsed = min(time.time() - open_hand_start_time, TOGGLE_GESTURE_DURATION)
             progress_ratio = hold_elapsed / TOGGLE_GESTURE_DURATION
             action_text = "finishing..." if is_recording else "starting..."
             cv2.putText(frame, f"hold open hand: {action_text}", (40, h - 50), 
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2, cv2.LINE_AA)
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 255, 255), 2, cv2.LINE_AA)
             cv2.rectangle(frame, (40, h - 35), (240, h - 20), (100, 100, 100), 2)
             cv2.rectangle(frame, (40, h - 35), (40 + int(200 * progress_ratio), h - 20), (0, 255, 255), -1)
+
+        if space_start_time:
+            space_elapsed = min(time.time() - space_start_time, ACTION_GESTURE_DURATION)
+            s_ratio = space_elapsed / ACTION_GESTURE_DURATION
+            cv2.putText(frame, "adding space...", (280, h - 50), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 0), 2, cv2.LINE_AA)
+            cv2.rectangle(frame, (280, h - 35), (480, h - 20), (100, 100, 100), 2)
+            cv2.rectangle(frame, (280, h - 35), (280 + int(200 * s_ratio), h - 20), (255, 255, 0), -1)
+
+        if is_recording and current_mode == "SPELL" and current_holding_letter and current_holding_letter != "-" and letter_hold_start_time:
+            letter_elapsed = min(time.time() - letter_hold_start_time, HOLD_LETTER_DURATION)
+            l_ratio = letter_elapsed / HOLD_LETTER_DURATION
+            cv2.putText(frame, f"typing '{current_holding_letter}'...", (w - 280, h - 50), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 255, 0), 2, cv2.LINE_AA)
+            cv2.rectangle(frame, (w - 280, h - 35), (w - 40, h - 20), (100, 100, 100), 2)
+            cv2.rectangle(frame, (w - 280, h - 35), (w - 280 + int(240 * l_ratio), h - 20), (0, 255, 0), -1)
+
+        if is_recording and current_mode == "WORD":
+            buf_len = len(word_sequence_buffer)
+            w_ratio = buf_len / 30.0
+            cv2.putText(frame, f"word buffer: {buf_len}/30 frames", (w - 320, h - 50), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 0, 150), 2, cv2.LINE_AA)
+            cv2.rectangle(frame, (w - 320, h - 35), (w - 40, h - 20), (100, 100, 100), 2)
+            cv2.rectangle(frame, (w - 320, h - 35), (w - 320 + int(280 * w_ratio), h - 20), (255, 0, 150), -1)
 
         cv2.imshow(window_name, frame)
 
