@@ -284,11 +284,6 @@ def main():
     exclamation_sub = False
     selected_tone = "neutral"
 
-    disambiguation_active = False
-    disambig_candidates = ("", "")
-    disambig_selected = ""
-    awaiting_confirmation = False
-
     current_word = ""
     finished_word = ""
     word_history = []
@@ -321,45 +316,12 @@ def main():
 
         with bg_ai.result_lock:
             predicted_letter = bg_ai.predicted_letter
-            top_candidates = bg_ai.top_candidates
-
-        if is_recording and not disambiguation_active and len(top_candidates) >= 2:
-            (cand1, p1), (cand2, p2) = top_candidates[0], top_candidates[1]
-            if (p1 + p2) >= 0.95 and cand1 != cand2:
-                disambiguation_active = True
-                disambig_candidates = (cand1, cand2)
-                awaiting_confirmation = False
-                disambig_selected = ""
 
         if mouse_click_pos is not None:
             mx, my = mouse_click_pos
             mouse_click_pos = None
 
-            if disambiguation_active:
-                if not awaiting_confirmation:
-                    btn_y1, btn_y2 = cy - 20, cy + 70
-                    if (cx - 240) <= mx <= (cx - 20) and btn_y1 <= my <= btn_y2:
-                        disambig_selected = disambig_candidates[0]
-                        awaiting_confirmation = True
-                    elif (cx + 20) <= mx <= (cx + 240) and btn_y1 <= my <= btn_y2:
-                        disambig_selected = disambig_candidates[1]
-                        awaiting_confirmation = True
-                    elif (cx - 100) <= mx <= (cx + 100) and (cy + 85) <= my <= (cy + 120):
-                        disambiguation_active = False
-                else:
-                    btn_y1, btn_y2 = cy + 20, cy + 70
-                    if (cx - 210) <= mx <= (cx - 10) and btn_y1 <= my <= btn_y2:
-                        current_word += disambig_selected
-                        tts.speak(disambig_selected, tone="neutral")
-                        disambiguation_active = False
-                        awaiting_confirmation = False
-                        disambig_selected = ""
-                    elif (cx + 10) <= mx <= (cx + 210) and btn_y1 <= my <= btn_y2:
-                        disambiguation_active = False
-                        awaiting_confirmation = False
-                        disambig_selected = ""
-
-            elif (w - 410) <= mx <= (w - 280) and 20 <= my <= 55:
+            if (w - 410) <= mx <= (w - 280) and 20 <= my <= 55:
                 current_mode = "WORD" if current_mode == "SPELL" else "SPELL"
                 word_sequence_buffer.clear()
                 last_word_pred_time = 0.0
@@ -471,7 +433,7 @@ def main():
                 if not space_gesture_detected:
                     open_hand = is_open_hand(primary_hand)
 
-                if is_recording and space_gesture_detected and not disambiguation_active:
+                if is_recording and space_gesture_detected:
                     if space_start_time is None:
                         space_start_time = time.time()
                     elif (time.time() - space_start_time >= ACTION_GESTURE_DURATION) and not space_triggered:
@@ -481,7 +443,7 @@ def main():
                     space_start_time = None
                     space_triggered = False
 
-                if open_hand and not space_gesture_detected and hand_movement < 0.035 and not disambiguation_active:
+                if open_hand and not space_gesture_detected and hand_movement < 0.035:
                     if open_hand_start_time is None:
                         open_hand_start_time = time.time()
                     elif (time.time() - open_hand_start_time >= TOGGLE_GESTURE_DURATION) and not open_hand_triggered:
@@ -535,7 +497,7 @@ def main():
             current_holding_letter = None
             prev_wrist_pos = None
 
-        if is_recording and not open_hand and not space_gesture_detected and hand_detected and not disambiguation_active:
+        if is_recording and not open_hand and not space_gesture_detected and hand_detected:
             if current_mode == "SPELL":
                 if predicted_letter == current_holding_letter:
                     elapsed = time.time() - letter_hold_start_time
@@ -614,7 +576,7 @@ def main():
                     cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 0), 2, cv2.LINE_AA)
 
         # progress bar under sign label for pending append action
-        if is_recording and not open_hand and not space_gesture_detected and hand_detected and not disambiguation_active:
+        if is_recording and not open_hand and not space_gesture_detected and hand_detected:
             if current_mode == "SPELL" and current_holding_letter and current_holding_letter != "-" and letter_hold_start_time:
                 letter_elapsed = min(time.time() - letter_hold_start_time, HOLD_LETTER_DURATION)
                 l_ratio = letter_elapsed / HOLD_LETTER_DURATION
@@ -639,56 +601,6 @@ def main():
                         cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2, cv2.LINE_AA)
             cv2.putText(frame, f"word: {current_word}_", (40, 205), 
                         cv2.FONT_HERSHEY_SIMPLEX, 1.1, (255, 0, 255), 3, cv2.LINE_AA)
-
-        if disambiguation_active:
-            box_w, box_h = 600, 260
-            m_x1, m_y1 = cx - box_w // 2, cy - box_h // 2
-            m_x2, m_y2 = cx + box_w // 2, cy + box_h // 2
-
-            cv2.rectangle(frame, (m_x1, m_y1), (m_x2, m_y2), (20, 20, 20), -1)
-            cv2.rectangle(frame, (m_x1, m_y1), (m_x2, m_y2), (0, 215, 255), 2)
-
-            if not awaiting_confirmation:
-                title = "Algorithm confused! Did you mean:"
-                t_size = cv2.getTextSize(title, cv2.FONT_HERSHEY_SIMPLEX, 0.8, 2)[0]
-                cv2.putText(frame, title, (cx - t_size[0] // 2, cy - 65), 
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 215, 255), 2, cv2.LINE_AA)
-
-                btn_w, btn_h = 220, 90
-                btn_y1 = cy - 20
-
-                c1_text = disambig_candidates[0]
-                cv2.rectangle(frame, (cx - 240, btn_y1), (cx - 20, btn_y1 + btn_h), (180, 100, 0), -1)
-                cv2.rectangle(frame, (cx - 240, btn_y1), (cx - 20, btn_y1 + btn_h), (255, 255, 255), 2)
-                cv2.putText(frame, c1_text, (cx - 140, btn_y1 + 55), 
-                            cv2.FONT_HERSHEY_SIMPLEX, 1.2, (255, 255, 255), 3, cv2.LINE_AA)
-
-                c2_text = disambig_candidates[1]
-                cv2.rectangle(frame, (cx + 20, btn_y1), (cx + 240, btn_y1 + btn_h), (0, 140, 200), -1)
-                cv2.rectangle(frame, (cx + 20, btn_y1), (cx + 240, btn_y1 + btn_h), (255, 255, 255), 2)
-                cv2.putText(frame, c2_text, (cx + 120, btn_y1 + 55), 
-                            cv2.FONT_HERSHEY_SIMPLEX, 1.2, (255, 255, 255), 3, cv2.LINE_AA)
-
-                cv2.rectangle(frame, (cx - 100, cy + 85), (cx + 100, cy + 120), (80, 80, 80), -1)
-                cv2.putText(frame, "DISMISS", (cx - 45, cy + 108), 
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
-            else:
-                title = f"Are you sure you want to add '{disambig_selected}'?"
-                t_size = cv2.getTextSize(title, cv2.FONT_HERSHEY_SIMPLEX, 0.75, 2)[0]
-                cv2.putText(frame, title, (cx - t_size[0] // 2, cy - 30), 
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.75, (255, 255, 255), 2, cv2.LINE_AA)
-
-                btn_y1, btn_y2 = cy + 20, cy + 70
-
-                cv2.rectangle(frame, (cx - 210, btn_y1), (cx - 10, btn_y2), (0, 160, 0), -1)
-                cv2.rectangle(frame, (cx - 210, btn_y1), (cx - 10, btn_y2), (255, 255, 255), 2)
-                cv2.putText(frame, "YES, ADD IT", (cx - 170, btn_y1 + 32), 
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 2, cv2.LINE_AA)
-
-                cv2.rectangle(frame, (cx + 10, btn_y1), (cx + 210, btn_y2), (0, 0, 180), -1)
-                cv2.rectangle(frame, (cx + 10, btn_y1), (cx + 210, btn_y2), (255, 255, 255), 2)
-                cv2.putText(frame, "CANCEL", (cx + 70, btn_y1 + 32), 
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 2, cv2.LINE_AA)
 
         # bottom progress bars for palm toggle and space gestures
         if open_hand_start_time:
