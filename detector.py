@@ -10,6 +10,8 @@ import os
 import asyncio
 import edge_tts
 import pygame
+import urllib.request
+import json
 from collections import deque, Counter
 from train_model import extract_hand_features
 
@@ -38,6 +40,62 @@ HAND_CONNECTIONS = [
     (17, 18), (18, 19), (19, 20),           # pinky
     (0, 5), (5, 9), (9, 13), (13, 17), (0, 17) # palm
 ]
+
+def transform_tense(text, target_tense):
+    if not text or target_tense == "ORIGINAL":
+        return text
+
+    punct = ""
+    if text[-1] in ".!?":
+        punct = text[-1]
+        clean = text[:-1].strip()
+    else:
+        clean = text.strip()
+
+    gemini_key = os.environ.get("GEMINI_API_KEY")
+
+    if gemini_key:
+        try:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={gemini_key}"
+            prompt = (
+                f"Convert the following ASL gloss / sentence to grammatically natural English in the {target_tense.lower()} tense. "
+                f"Return ONLY the updated sentence, nothing else.\nSentence: '{clean}'"
+            )
+            payload = json.dumps({"contents": [{"parts": [{"text": prompt}]}]}).encode('utf-8')
+            req = urllib.request.Request(url, data=payload, headers={'Content-Type': 'application/json'})
+            with urllib.request.urlopen(req, timeout=3) as resp:
+                res = json.loads(resp.read().decode('utf-8'))
+                out = res["candidates"][0]["content"]["parts"][0]["text"].strip()
+                if punct and not out[-1] in ".!?":
+                    out += punct
+                return out
+        except Exception as e:
+            print("LLM Tense conversion api error, falling back to basic rules:", e)
+
+    #fallback heuristic rule engine if no api key is provided
+    words = clean.split()
+    if not words:
+        return text
+
+    first_word = words[0].lower()
+    rest = " ".join(words[1:]) if len(words) > 1 else ""
+
+    if target_tense == "FUTURE":
+        if first_word in ["i", "you", "he", "she", "we", "they", "it"]:
+            res = f"{words[0]} will {rest}".strip()
+        else:
+            res = f"will {clean}".strip()
+    elif target_tense == "PAST":
+        if first_word in ["i", "you", "he", "she", "we", "they", "it"]:
+            res = f"{words[0]} did {rest}".strip()
+        else:
+            res = f"did {clean}".strip()
+    else:  # PRESENT
+        res = clean
+
+    if punct and not res.endswith(punct):
+        res += punct
+    return res
 
 class WebcamVideoStream:
     def __init__(self, src=0):
@@ -281,6 +339,10 @@ def main():
 
     is_recording = False
     selecting_punctuation = False
+    selecting_tense = False
+    is_converting_tense = False
+    temp_sentence = ""
+
     exclamation_sub = False
     selected_tone = "neutral"
 
@@ -330,6 +392,7 @@ def main():
                 current_word = ""
                 finished_word = ""
                 selecting_punctuation = False
+                selecting_tense = False
                 exclamation_sub = False
 
             elif (w - 270) <= mx <= (w - 150) and 20 <= my <= 55:
@@ -343,44 +406,71 @@ def main():
                     start_x = cx - 320
 
                     if (start_x) <= mx <= (start_x + btn_w) and btn_y1 <= my <= btn_y2:
-                        finished_word = current_word.strip() + "."
+                        temp_sentence = current_word.strip() + "."
                         selected_tone = "neutral"
                         selecting_punctuation = False
-                        if finished_word:
-                            word_history.append(finished_word)
-                            tts.speak(finished_word, selected_tone)
+                        selecting_tense = True
 
                     elif (start_x + 240) <= mx <= (start_x + 240 + btn_w) and btn_y1 <= my <= btn_y2:
                         exclamation_sub = True
 
                     elif (start_x + 480) <= mx <= (start_x + 480 + btn_w) and btn_y1 <= my <= btn_y2:
-                        finished_word = current_word.strip() + "?"
+                        temp_sentence = current_word.strip() + "?"
                         selected_tone = "surprised"
                         selecting_punctuation = False
-                        if finished_word:
-                            word_history.append(finished_word)
-                            tts.speak(finished_word, selected_tone)
+                        selecting_tense = True
                 else:
                     btn_w = 220
                     start_x = cx - 240
 
                     if (start_x) <= mx <= (start_x + btn_w) and btn_y1 <= my <= btn_y2:
-                        finished_word = current_word.strip() + "!"
+                        temp_sentence = current_word.strip() + "!"
                         selected_tone = "happy"
                         selecting_punctuation = False
                         exclamation_sub = False
-                        if finished_word:
-                            word_history.append(finished_word)
-                            tts.speak(finished_word, selected_tone)
+                        selecting_tense = True
 
                     elif (start_x + 260) <= mx <= (start_x + 260 + btn_w) and btn_y1 <= my <= btn_y2:
-                        finished_word = current_word.strip() + "!"
+                        temp_sentence = current_word.strip() + "!"
                         selected_tone = "angry"
                         selecting_punctuation = False
                         exclamation_sub = False
-                        if finished_word:
-                            word_history.append(finished_word)
-                            tts.speak(finished_word, selected_tone)
+                        selecting_tense = True
+
+            elif selecting_tense and not is_converting_tense:
+                chosen_tense = None
+
+                #present, past row 1
+                if (cy - 10) <= my <= (cy + 35):
+                    if (cx - 210) <= mx <= (cx - 10):
+                        chosen_tense = "PRESENT"
+                    elif (cx + 10) <= mx <= (cx + 210):
+                        chosen_tense = "PAST"
+                #future, og row 2
+                elif (cy + 50) <= my <= (cy + 95):
+                    if (cx - 210) <= mx <= (cx - 10):
+                        chosen_tense = "FUTURE"
+                    elif (cx + 10) <= mx <= (cx + 210):
+                        chosen_tense = "ORIGINAL"
+
+                if chosen_tense:
+                    selecting_tense = False
+                    is_converting_tense = True
+
+                    def process_tense_and_speak(t_tense, raw_sent, tone):
+                        nonlocal finished_word, is_converting_tense
+                        final_sent = transform_tense(raw_sent, t_tense)
+                        finished_word = final_sent
+                        if final_sent:
+                            word_history.append(final_sent)
+                            tts.speak(final_sent, tone)
+                        is_converting_tense = False
+
+                    threading.Thread(
+                        target=process_tense_and_speak, 
+                        args=(chosen_tense, temp_sentence, selected_tone), 
+                        daemon=True
+                    ).start()
 
             elif not is_recording and finished_word:
                 btn_y1, btn_y2 = cy + 20, cy + 65
@@ -454,6 +544,7 @@ def main():
                             current_word = ""
                             finished_word = ""
                             selecting_punctuation = False
+                            selecting_tense = False
                             exclamation_sub = False
                             word_sequence_buffer.clear()
                             last_word_pred_time = 0.0
@@ -602,7 +693,57 @@ def main():
             cv2.putText(frame, f"word: {current_word}_", (40, 205), 
                         cv2.FONT_HERSHEY_SIMPLEX, 1.1, (255, 0, 255), 3, cv2.LINE_AA)
 
-        # bottom progress bars for palm toggle and space gestures
+        # tense selection modal UI
+        if selecting_tense:
+            box_w, box_h = 600, 260
+            m_x1, m_y1 = cx - box_w // 2, cy - box_h // 2
+            m_x2, m_y2 = cx + box_w // 2, cy + box_h // 2
+
+            cv2.rectangle(frame, (m_x1, m_y1), (m_x2, m_y2), (20, 20, 20), -1)
+            cv2.rectangle(frame, (m_x1, m_y1), (m_x2, m_y2), (0, 215, 255), 2)
+
+            title = "SELECT SENTENCE TENSE"
+            t_size = cv2.getTextSize(title, cv2.FONT_HERSHEY_SIMPLEX, 0.8, 2)[0]
+            cv2.putText(frame, title, (cx - t_size[0] // 2, cy - 75), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 215, 255), 2, cv2.LINE_AA)
+
+            sub_txt = f"'{temp_sentence}'"
+            s_size = cv2.getTextSize(sub_txt, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 1)[0]
+            cv2.putText(frame, sub_txt, (cx - s_size[0] // 2, cy - 40), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (200, 200, 200), 1, cv2.LINE_AA)
+
+            btn_h = 45
+            btn_w = 200
+
+            #present
+            cv2.rectangle(frame, (cx - 210, cy - 10), (cx - 10, cy - 10 + btn_h), (0, 160, 0), -1)
+            cv2.rectangle(frame, (cx - 210, cy - 10), (cx - 10, cy - 10 + btn_h), (255, 255, 255), 1)
+            cv2.putText(frame, "PRESENT", (cx - 160, cy + 18), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 2, cv2.LINE_AA)
+
+            #past
+            cv2.rectangle(frame, (cx + 10, cy - 10), (cx + 210, cy - 10 + btn_h), (180, 100, 0), -1)
+            cv2.rectangle(frame, (cx + 10, cy - 10), (cx + 210, cy - 10 + btn_h), (255, 255, 255), 1)
+            cv2.putText(frame, "PAST", (cx + 80, cy + 18), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 2, cv2.LINE_AA)
+
+            #future
+            cv2.rectangle(frame, (cx - 210, cy + 50), (cx - 10, cy + 50 + btn_h), (150, 0, 180), -1)
+            cv2.rectangle(frame, (cx - 210, cy + 50), (cx - 10, cy + 50 + btn_h), (255, 255, 255), 1)
+            cv2.putText(frame, "FUTURE", (cx - 150, cy + 78), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 2, cv2.LINE_AA)
+
+            #og
+            cv2.rectangle(frame, (cx + 10, cy + 50), (cx + 210, cy + 50 + btn_h), (70, 70, 70), -1)
+            cv2.rectangle(frame, (cx + 10, cy + 50), (cx + 210, cy + 50 + btn_h), (255, 255, 255), 1)
+            cv2.putText(frame, "ORIGINAL", (cx + 55, cy + 78), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 2, cv2.LINE_AA)
+
+        if is_converting_tense:
+            cv2.putText(frame, "CONVERTING TENSE WITH AI...", (cx - 180, cy), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2, cv2.LINE_AA)
+
+        #bottom progress bars for palm toggle and space gestures
         if open_hand_start_time:
             hold_elapsed = min(time.time() - open_hand_start_time, TOGGLE_GESTURE_DURATION)
             progress_ratio = hold_elapsed / TOGGLE_GESTURE_DURATION
