@@ -176,20 +176,21 @@ class BackgroundAI:
                         self.wrist_history.append(raw_wrist_x)
                     
                     if hasattr(self.asl_model, "predict_proba"):
-                        probs = self.asl_model.predict_proba([features[:123]])[0]
+                        # pass updated full feature vector to model
+                        probs = self.asl_model.predict_proba([features])[0]
                         classes = self.asl_model.classes_
                         top_idx = np.argsort(probs)[::-1][:2]
                         
                         raw_pred = classes[top_idx[0]]
                         p1, p2 = probs[top_idx[0]], probs[top_idx[1]]
 
-                        #save raw probs for threshold checks
+                        # save raw probs for threshold checks
                         local_top_candidates = [
                             (str(classes[top_idx[0]]), float(p1)),
                             (str(classes[top_idx[1]]), float(p2))
                         ]
                     else:
-                        raw_pred = self.asl_model.predict([features[:123]])[0]
+                        raw_pred = self.asl_model.predict([features])[0]
                         local_top_candidates = [(str(raw_pred), 1.0)]
                     
                     if raw_pred in ['I', 'J'] and len(self.wrist_history) == 15:
@@ -217,7 +218,7 @@ class BackgroundAI:
                 self.top_candidates = local_top_candidates
 
 def is_open_hand(hand_landmarks):
-    #check 4 main fingers
+    # check 4 main fingers
     fingers_extended = [
         hand_landmarks[8].y < hand_landmarks[6].y,   # index
         hand_landmarks[12].y < hand_landmarks[10].y, # middle
@@ -225,7 +226,7 @@ def is_open_hand(hand_landmarks):
         hand_landmarks[20].y < hand_landmarks[18].y  # pinky
     ]
     
-    #check thumb position
+    # check thumb position
     thumb_tip = np.array([hand_landmarks[4].x, hand_landmarks[4].y])
     pinky_mcp = np.array([hand_landmarks[17].x, hand_landmarks[17].y])
     wrist = np.array([hand_landmarks[0].x, hand_landmarks[0].y])
@@ -243,7 +244,7 @@ def is_two_open_hands(hand1, hand2):
 def main():
     base_options = python.BaseOptions(model_asset_path='hand_landmarker.task')
     
-    #lower thresholds slightly so two hands get picked up reliably
+    # lower thresholds slightly so two hands get picked up reliably
     options = vision.HandLandmarkerOptions(
         base_options=base_options, 
         running_mode=vision.RunningMode.VIDEO, 
@@ -327,7 +328,7 @@ def main():
             predicted_letter = bg_ai.predicted_letter
             top_candidates = bg_ai.top_candidates
 
-        #show popup when raw confidence hits 95%+
+        # show popup when raw confidence hits 95%+
         if is_recording and not disambiguation_active and len(top_candidates) >= 2:
             (cand1, p1), (cand2, p2) = top_candidates[0], top_candidates[1]
             if (p1 + p2) >= 0.95 and cand1 != cand2:
@@ -574,7 +575,7 @@ def main():
             letter_hold_start_time = None
             current_holding_letter = None
 
-        #draw hud
+        # draw hud
         mode_color = (0, 165, 255) if current_mode == "SPELL" else (255, 0, 150)
         cv2.rectangle(frame, (w - 410, 20), (w - 280, 55), mode_color, -1)
         cv2.rectangle(frame, (w - 410, 20), (w - 280, 55), (255, 255, 255), 2)
@@ -675,7 +676,7 @@ def main():
                 cv2.putText(frame, "CANCEL", (cx + 70, btn_y1 + 32), 
                             cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 2, cv2.LINE_AA)
 
-        #progress bar render logic
+        # progress bar render logic
         if open_hand_start_time:
             hold_elapsed = min(time.time() - open_hand_start_time, TOGGLE_GESTURE_DURATION)
             progress_ratio = hold_elapsed / TOGGLE_GESTURE_DURATION
