@@ -18,7 +18,6 @@ HAND_CONNECTIONS = [
 ]
 
 def is_valid_hand_shape(landmarks):
-    # matches detector.py hand scale filter DONT TOUCH
     wrist = np.array([landmarks[0].x, landmarks[0].y])
     middle_mcp = np.array([landmarks[9].x, landmarks[9].y])
     palm_size = np.linalg.norm(wrist - middle_mcp)
@@ -36,9 +35,23 @@ def append_sample_to_csv(filepath, row_data):
             writer = csv.writer(f)
             writer.writerow(row_data)
 
+def delete_last_csv_row(filepath):
+    if not os.path.exists(filepath):
+        return False
+    try:
+        with open(filepath, mode="r", encoding="utf-8") as f:
+            lines = f.readlines()
+        if not lines:
+            return False
+        with open(filepath, mode="w", encoding="utf-8") as f:
+            f.writelines(lines[:-1])
+        return True
+    except Exception as e:
+        print(f"[error] failed to delete last sample from CSV: {e}")
+        return False
+
 def main():
-    # setup mediapipe tasks hand landmarker matching detector.py parameters (2 hands)
-    base_options = python.BaseOptions(model_asset_path='hand_landmarker.task')
+    base_options = python.BaseOptions(model_asset_path="hand_landmarker.task")
     options = vision.HandLandmarkerOptions(
         base_options=base_options, 
         running_mode=vision.RunningMode.VIDEO, 
@@ -49,7 +62,6 @@ def main():
     )
     detector = vision.HandLandmarker.create_from_options(options)
 
-    #126 features per frame * 30 frames = 3780
     dummy_pts = np.zeros((21, 3))
     num_features_per_frame = len(extract_hand_features(dummy_pts))
     frames_per_sample = 30
@@ -81,11 +93,13 @@ def main():
     last_timestamp_ms = 0
 
     print(f"\n--- starting word data collection for '{word_to_record}' ---")
-    print("controls: press 's' to record a sample, press 'q' to quit early.\n")
+    print("controls: 's' = record | 'd' = delete last sample | 'q' = quit\n")
 
     sample_idx = 0
+    status_msg = ""
+    status_timer = 0
+
     while sample_idx < samples_to_collect:
-        # prompt screen loop
         ready_to_record = False
         while True:
             ret, frame = cap.read()
@@ -95,14 +109,28 @@ def main():
 
             cv2.putText(frame, f"word: {word_to_record} | sample {sample_idx + 1}/{samples_to_collect}", 
                         (30, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2, cv2.LINE_AA)
-            cv2.putText(frame, "press 's' to start sample recording | 'q' to exit", 
+            cv2.putText(frame, "press 's' to record | 'd' to delete last | 'q' to exit", 
                         (30, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1, cv2.LINE_AA)
-            
+
+            if time.time() < status_timer:
+                cv2.putText(frame, status_msg, (30, 130), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 165, 255), 2, cv2.LINE_AA)
+
             cv2.imshow("word data collector", frame)
             key = cv2.waitKey(1) & 0xFF
             if key == ord('s'):
                 ready_to_record = True
                 break
+            elif key == ord('d'):
+                if sample_idx > 0:
+                    if delete_last_csv_row(csv_file):
+                        sample_idx -= 1
+                        status_msg = f"DELETED sample {sample_idx + 1}. Retrying sample {sample_idx + 1}..."
+                        print(f"[undo] deleted last recorded sample. now at sample {sample_idx}/{samples_to_collect}")
+                    else:
+                        status_msg = "Could not delete sample from CSV."
+                else:
+                    status_msg = "No samples recorded in this session to delete."
+                status_timer = time.time() + 3.0
             elif key == ord('q'):
                 print("\ncollection canceled early by user.")
                 cap.release()
@@ -138,7 +166,6 @@ def main():
                     pts = np.array([[lm.x, lm.y, lm.z] for lm in primary_hand])
                     feats = extract_hand_features(pts)
 
-                    #skeleton overlays for both hands 
                     for hand_landmarks in valid_hands:
                         for connection in HAND_CONNECTIONS:
                             start_p = (int(hand_landmarks[connection[0]].x * w), int(hand_landmarks[connection[0]].y * h))
@@ -163,7 +190,6 @@ def main():
             cv2.imshow("word data collector", frame)
             cv2.waitKey(20)
 
-        # append sample row to csv cleanly
         sample_row = [word_to_record] + sequence_features
         append_sample_to_csv(csv_file, sample_row)
         sample_idx += 1
