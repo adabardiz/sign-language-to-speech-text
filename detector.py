@@ -34,9 +34,9 @@ except Exception as e:
 
 HAND_CONNECTIONS = [
     (0, 1), (1, 2), (2, 3), (3, 4),         # thumb
-    (5, 6), (6, 7), (7, 8),                 # index 
-    (9, 10), (10, 11), (11, 12),            # middle 
-    (13, 14), (14, 15), (15, 16),           # ring 
+    (5, 6), (6, 7), (7, 8),                 # index
+    (9, 10), (10, 11), (11, 12),            # middle
+    (13, 14), (14, 15), (15, 16),           # ring
     (17, 18), (18, 19), (19, 20),           # pinky
     (0, 5), (5, 9), (9, 13), (13, 17), (0, 17) # palm
 ]
@@ -72,7 +72,6 @@ def transform_tense(text, target_tense):
         except Exception as e:
             print("LLM Tense conversion api error, falling back to basic rules:", e)
 
-    #fallback heuristic rule engine if no api key is provided
     words = clean.split()
     if not words:
         return text
@@ -90,7 +89,7 @@ def transform_tense(text, target_tense):
             res = f"{words[0]} did {rest}".strip()
         else:
             res = f"did {clean}".strip()
-    else:  # PRESENT
+    else:  # present
         res = clean
 
     if punct and not res.endswith(punct):
@@ -167,6 +166,12 @@ class SpeechEngine:
                         elif tone == "surprised":
                             pitch = "+15Hz"
                             rate = "+0%"
+                        elif tone == "sarcastic":
+                            pitch = "-20Hz"
+                            rate = "-25%"
+                        elif tone == "sad":
+                            pitch = "-15Hz"
+                            rate = "-30%"
                         
                         cache_file = os.path.join(self.cache_dir, f"{safe_filename}_{voice_label}_{tone}.mp3")
 
@@ -339,11 +344,11 @@ def main():
 
     is_recording = False
     selecting_punctuation = False
+    punct_sub = None  # tracks sub menus like period, exclamation, or question
     selecting_tense = False
     is_converting_tense = False
     temp_sentence = ""
 
-    exclamation_sub = False
     selected_tone = "neutral"
 
     current_word = ""
@@ -392,61 +397,83 @@ def main():
                 current_word = ""
                 finished_word = ""
                 selecting_punctuation = False
+                punct_sub = None
                 selecting_tense = False
-                exclamation_sub = False
 
             elif (w - 270) <= mx <= (w - 150) and 20 <= my <= 55:
                 current_word = current_word[:-1]
 
             elif selecting_punctuation:
-                btn_y1, btn_y2 = cy - 10, cy + 100
+                btn_y1, btn_y2 = cy - 10, cy + 80
 
-                if not exclamation_sub:
-                    btn_w = 200
-                    start_x = cx - 320
+                if punct_sub is None:
+                    # top level punct choices
+                    if (cx - 320) <= mx <= (cx - 120) and btn_y1 <= my <= btn_y2:
+                        punct_sub = "PERIOD"
+                    elif (cx - 100) <= mx <= (cx + 100) and btn_y1 <= my <= btn_y2:
+                        punct_sub = "EXCLAMATION"
+                    elif (cx + 120) <= mx <= (cx + 320) and btn_y1 <= my <= btn_y2:
+                        punct_sub = "QUESTION"
 
-                    if (start_x) <= mx <= (start_x + btn_w) and btn_y1 <= my <= btn_y2:
+                elif punct_sub == "PERIOD":
+                    # period tones
+                    if (cx - 300) <= mx <= (cx - 110) and btn_y1 <= my <= btn_y2:
                         temp_sentence = current_word.strip() + "."
                         selected_tone = "neutral"
                         selecting_punctuation = False
+                        punct_sub = None
                         selecting_tense = True
-
-                    elif (start_x + 240) <= mx <= (start_x + 240 + btn_w) and btn_y1 <= my <= btn_y2:
-                        exclamation_sub = True
-
-                    elif (start_x + 480) <= mx <= (start_x + 480 + btn_w) and btn_y1 <= my <= btn_y2:
-                        temp_sentence = current_word.strip() + "?"
-                        selected_tone = "surprised"
+                    elif (cx - 95) <= mx <= (cx + 95) and btn_y1 <= my <= btn_y2:
+                        temp_sentence = current_word.strip() + "."
+                        selected_tone = "sad"
                         selecting_punctuation = False
+                        punct_sub = None
                         selecting_tense = True
-                else:
-                    btn_w = 220
-                    start_x = cx - 240
+                    elif (cx + 110) <= mx <= (cx + 300) and btn_y1 <= my <= btn_y2:
+                        temp_sentence = current_word.strip() + "."
+                        selected_tone = "sarcastic"
+                        selecting_punctuation = False
+                        punct_sub = None
+                        selecting_tense = True
 
-                    if (start_x) <= mx <= (start_x + btn_w) and btn_y1 <= my <= btn_y2:
+                elif punct_sub == "EXCLAMATION":
+                    # exclamation tones
+                    if (cx - 200) <= mx <= (cx - 10) and btn_y1 <= my <= btn_y2:
                         temp_sentence = current_word.strip() + "!"
                         selected_tone = "happy"
                         selecting_punctuation = False
-                        exclamation_sub = False
+                        punct_sub = None
                         selecting_tense = True
-
-                    elif (start_x + 260) <= mx <= (start_x + 260 + btn_w) and btn_y1 <= my <= btn_y2:
+                    elif (cx + 10) <= mx <= (cx + 200) and btn_y1 <= my <= btn_y2:
                         temp_sentence = current_word.strip() + "!"
                         selected_tone = "angry"
                         selecting_punctuation = False
-                        exclamation_sub = False
+                        punct_sub = None
+                        selecting_tense = True
+
+                elif punct_sub == "QUESTION":
+                    # question tones
+                    if (cx - 200) <= mx <= (cx - 10) and btn_y1 <= my <= btn_y2:
+                        temp_sentence = current_word.strip() + "?"
+                        selected_tone = "surprised"
+                        selecting_punctuation = False
+                        punct_sub = None
+                        selecting_tense = True
+                    elif (cx + 10) <= mx <= (cx + 200) and btn_y1 <= my <= btn_y2:
+                        temp_sentence = current_word.strip() + "?"
+                        selected_tone = "sarcastic"
+                        selecting_punctuation = False
+                        punct_sub = None
                         selecting_tense = True
 
             elif selecting_tense and not is_converting_tense:
                 chosen_tense = None
 
-                #present, past row 1
                 if (cy - 10) <= my <= (cy + 35):
                     if (cx - 210) <= mx <= (cx - 10):
                         chosen_tense = "PRESENT"
                     elif (cx + 10) <= mx <= (cx + 210):
                         chosen_tense = "PAST"
-                #future, og row 2
                 elif (cy + 50) <= my <= (cy + 95):
                     if (cx - 210) <= mx <= (cx - 10):
                         chosen_tense = "FUTURE"
@@ -483,7 +510,7 @@ def main():
                         word_history.pop()
                     finished_word = ""
                     selecting_punctuation = True
-                    exclamation_sub = False
+                    punct_sub = None
 
                 elif (cx + 115) <= mx <= (cx + 305) and btn_y1 <= my <= btn_y2:
                     finished_word = ""
@@ -544,14 +571,14 @@ def main():
                             current_word = ""
                             finished_word = ""
                             selecting_punctuation = False
+                            punct_sub = None
                             selecting_tense = False
-                            exclamation_sub = False
                             word_sequence_buffer.clear()
                             last_word_pred_time = 0.0
                         else:
                             if current_word.strip():
                                 selecting_punctuation = True
-                                exclamation_sub = False
+                                punct_sub = None
                             else:
                                 finished_word = ""
                         open_hand_start_time = None
@@ -566,7 +593,7 @@ def main():
 
                 for hand_landmarks in valid_hands:
                     for connection in HAND_CONNECTIONS:
-                        start_p = (int(hand_landmarks[connection[0]].x * w), int(hand_landmarks[connection[0]].y * h))
+                        start_p = (int(hand_landmarks[connection[0]].x * w), int(hand_landmarks[connection[1]].y * h))
                         end_p = (int(hand_landmarks[connection[1]].x * w), int(hand_landmarks[connection[1]].y * h))
                         cv2.line(frame, start_p, end_p, (255, 255, 255), 2)
 
@@ -622,7 +649,7 @@ def main():
             letter_hold_start_time = None
             current_holding_letter = None
 
-        # draw hud buttons
+        # render controls ui
         mode_color = (0, 165, 255) if current_mode == "SPELL" else (255, 0, 150)
         cv2.rectangle(frame, (w - 410, 20), (w - 280, 55), mode_color, -1)
         cv2.rectangle(frame, (w - 410, 20), (w - 280, 55), (255, 255, 255), 2)
@@ -640,13 +667,14 @@ def main():
                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2, cv2.LINE_AA)
 
         box_x1, box_y1 = w - 300, 75
-        box_x2, box_y2 = w - 20, 260 
+        box_x2, box_y2 = w - 20, 280 
         cv2.rectangle(frame, (box_x1, box_y1), (box_x2, box_y2), (30, 30, 30), -1)
         cv2.rectangle(frame, (box_x1, box_y1), (box_x2, box_y2), (255, 255, 255), 1)
 
         instructions = [
             "CONTROLS:",
             "Toggle Mode: Click MODE or press 'm'",
+            "Start Word Mode: Press 's'",
             "Start/Finish: Hold STILL open palm up",
             "Space: Hold 2 open palms facing screen",
             "Delete: Click 'DELETE' button",
@@ -662,11 +690,9 @@ def main():
             cv2.putText(frame, line_text, (box_x1 + 10, y_pos),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.42, text_color, 1, cv2.LINE_AA)
 
-        # top left indicator labels
         cv2.putText(frame, f"sign: {predicted_letter}", (40, 50), 
                     cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 0), 2, cv2.LINE_AA)
 
-        # progress bar under sign label for pending append action
         if is_recording and not open_hand and not space_gesture_detected and hand_detected:
             if current_mode == "SPELL" and current_holding_letter and current_holding_letter != "-" and letter_hold_start_time:
                 letter_elapsed = min(time.time() - letter_hold_start_time, HOLD_LETTER_DURATION)
@@ -693,7 +719,98 @@ def main():
             cv2.putText(frame, f"word: {current_word}_", (40, 205), 
                         cv2.FONT_HERSHEY_SIMPLEX, 1.1, (255, 0, 255), 3, cv2.LINE_AA)
 
-        # tense selection modal UI
+        # render punctuation selection modals
+        if selecting_punctuation:
+            box_w, box_h = 750, 200
+            m_x1, m_y1 = cx - box_w // 2, cy - box_h // 2
+            m_x2, m_y2 = cx + box_w // 2, cy + box_h // 2
+
+            cv2.rectangle(frame, (m_x1, m_y1), (m_x2, m_y2), (20, 20, 20), -1)
+            cv2.rectangle(frame, (m_x1, m_y1), (m_x2, m_y2), (0, 215, 255), 2)
+
+            btn_y1 = cy - 10
+            btn_h = 90
+
+            if punct_sub is None:
+                title = "SELECT PUNCTUATION"
+                t_size = cv2.getTextSize(title, cv2.FONT_HERSHEY_SIMPLEX, 0.8, 2)[0]
+                cv2.putText(frame, title, (cx - t_size[0] // 2, cy - 40), 
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 215, 255), 2, cv2.LINE_AA)
+
+                btn_w = 200
+
+                # period
+                cv2.rectangle(frame, (cx - 320, btn_y1), (cx - 120, btn_y1 + btn_h), (70, 70, 70), -1)
+                cv2.rectangle(frame, (cx - 320, btn_y1), (cx - 120, btn_y1 + btn_h), (255, 255, 255), 1)
+                cv2.putText(frame, ". (PERIOD)", (cx - 295, btn_y1 + 55), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 2, cv2.LINE_AA)
+
+                # exclamation
+                cv2.rectangle(frame, (cx - 100, btn_y1), (cx + 100, btn_y1 + btn_h), (0, 150, 255), -1)
+                cv2.rectangle(frame, (cx - 100, btn_y1), (cx + 100, btn_y1 + btn_h), (255, 255, 255), 1)
+                cv2.putText(frame, "! (EXCLAMATION)", (cx - 90, btn_y1 + 55), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 2, cv2.LINE_AA)
+
+                # question
+                cv2.rectangle(frame, (cx + 120, btn_y1), (cx + 320, btn_y1 + btn_h), (180, 0, 180), -1)
+                cv2.rectangle(frame, (cx + 120, btn_y1), (cx + 320, btn_y1 + btn_h), (255, 255, 255), 1)
+                cv2.putText(frame, "? (QUESTION)", (cx + 135, btn_y1 + 55), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 2, cv2.LINE_AA)
+
+            elif punct_sub == "PERIOD":
+                title = "SELECT PERIOD TONE"
+                t_size = cv2.getTextSize(title, cv2.FONT_HERSHEY_SIMPLEX, 0.8, 2)[0]
+                cv2.putText(frame, title, (cx - t_size[0] // 2, cy - 40), 
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 215, 255), 2, cv2.LINE_AA)
+
+                btn_w = 190
+                # neutral
+                cv2.rectangle(frame, (cx - 300, btn_y1), (cx - 110, btn_y1 + btn_h), (70, 70, 70), -1)
+                cv2.rectangle(frame, (cx - 300, btn_y1), (cx - 110, btn_y1 + btn_h), (255, 255, 255), 1)
+                cv2.putText(frame, "NEUTRAL", (cx - 275, btn_y1 + 55), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 2, cv2.LINE_AA)
+
+                # sad
+                cv2.rectangle(frame, (cx - 95, btn_y1), (cx + 95, btn_y1 + btn_h), (180, 100, 0), -1)
+                cv2.rectangle(frame, (cx - 95, btn_y1), (cx + 95, btn_y1 + btn_h), (255, 255, 255), 1)
+                cv2.putText(frame, "SAD", (cx - 40, btn_y1 + 55), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 2, cv2.LINE_AA)
+
+                # sarcastic
+                cv2.rectangle(frame, (cx + 110, btn_y1), (cx + 300, btn_y1 + btn_h), (180, 0, 180), -1)
+                cv2.rectangle(frame, (cx + 110, btn_y1), (cx + 300, btn_y1 + btn_h), (255, 255, 255), 1)
+                cv2.putText(frame, "SARCASTIC", (cx + 125, btn_y1 + 55), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 2, cv2.LINE_AA)
+
+            elif punct_sub == "EXCLAMATION":
+                title = "SELECT EXCLAMATION TONE"
+                t_size = cv2.getTextSize(title, cv2.FONT_HERSHEY_SIMPLEX, 0.8, 2)[0]
+                cv2.putText(frame, title, (cx - t_size[0] // 2, cy - 40), 
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 215, 255), 2, cv2.LINE_AA)
+
+                btn_w = 190
+                # happy
+                cv2.rectangle(frame, (cx - 200, btn_y1), (cx - 10, btn_y1 + btn_h), (0, 180, 0), -1)
+                cv2.rectangle(frame, (cx - 200, btn_y1), (cx - 10, btn_y1 + btn_h), (255, 255, 255), 1)
+                cv2.putText(frame, "HAPPY", (cx - 160, btn_y1 + 55), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 2, cv2.LINE_AA)
+
+                # angry
+                cv2.rectangle(frame, (cx + 10, btn_y1), (cx + 200, btn_y1 + btn_h), (0, 0, 180), -1)
+                cv2.rectangle(frame, (cx + 10, btn_y1), (cx + 200, btn_y1 + btn_h), (255, 255, 255), 1)
+                cv2.putText(frame, "ANGRY", (cx + 55, btn_y1 + 55), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 2, cv2.LINE_AA)
+
+            elif punct_sub == "QUESTION":
+                title = "SELECT QUESTION TONE"
+                t_size = cv2.getTextSize(title, cv2.FONT_HERSHEY_SIMPLEX, 0.8, 2)[0]
+                cv2.putText(frame, title, (cx - t_size[0] // 2, cy - 40), 
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 215, 255), 2, cv2.LINE_AA)
+
+                btn_w = 190
+                # question
+                cv2.rectangle(frame, (cx - 200, btn_y1), (cx - 10, btn_y1 + btn_h), (180, 0, 180), -1)
+                cv2.rectangle(frame, (cx - 200, btn_y1), (cx - 10, btn_y1 + btn_h), (255, 255, 255), 1)
+                cv2.putText(frame, "QUESTION", (cx - 170, btn_y1 + 55), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 2, cv2.LINE_AA)
+
+                # sarcastic
+                cv2.rectangle(frame, (cx + 10, btn_y1), (cx + 200, btn_y1 + btn_h), (0, 150, 255), -1)
+                cv2.rectangle(frame, (cx + 10, btn_y1), (cx + 200, btn_y1 + btn_h), (255, 255, 255), 1)
+                cv2.putText(frame, "SARCASTIC", (cx + 25, btn_y1 + 55), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 2, cv2.LINE_AA)
+
+        # render tense selection modal
         if selecting_tense:
             box_w, box_h = 600, 260
             m_x1, m_y1 = cx - box_w // 2, cy - box_h // 2
@@ -713,27 +830,26 @@ def main():
                         cv2.FONT_HERSHEY_SIMPLEX, 0.6, (200, 200, 200), 1, cv2.LINE_AA)
 
             btn_h = 45
-            btn_w = 200
 
-            #present
+            # present
             cv2.rectangle(frame, (cx - 210, cy - 10), (cx - 10, cy - 10 + btn_h), (0, 160, 0), -1)
             cv2.rectangle(frame, (cx - 210, cy - 10), (cx - 10, cy - 10 + btn_h), (255, 255, 255), 1)
             cv2.putText(frame, "PRESENT", (cx - 160, cy + 18), 
                         cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 2, cv2.LINE_AA)
 
-            #past
+            # past
             cv2.rectangle(frame, (cx + 10, cy - 10), (cx + 210, cy - 10 + btn_h), (180, 100, 0), -1)
             cv2.rectangle(frame, (cx + 10, cy - 10), (cx + 210, cy - 10 + btn_h), (255, 255, 255), 1)
             cv2.putText(frame, "PAST", (cx + 80, cy + 18), 
                         cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 2, cv2.LINE_AA)
 
-            #future
+            # future
             cv2.rectangle(frame, (cx - 210, cy + 50), (cx - 10, cy + 50 + btn_h), (150, 0, 180), -1)
             cv2.rectangle(frame, (cx - 210, cy + 50), (cx - 10, cy + 50 + btn_h), (255, 255, 255), 1)
             cv2.putText(frame, "FUTURE", (cx - 150, cy + 78), 
                         cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 2, cv2.LINE_AA)
 
-            #og
+            # original
             cv2.rectangle(frame, (cx + 10, cy + 50), (cx + 210, cy + 50 + btn_h), (70, 70, 70), -1)
             cv2.rectangle(frame, (cx + 10, cy + 50), (cx + 210, cy + 50 + btn_h), (255, 255, 255), 1)
             cv2.putText(frame, "ORIGINAL", (cx + 55, cy + 78), 
@@ -743,7 +859,7 @@ def main():
             cv2.putText(frame, "CONVERTING TENSE WITH AI...", (cx - 180, cy), 
                         cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2, cv2.LINE_AA)
 
-        #bottom progress bars for palm toggle and space gestures
+        # bottom gesture indicators
         if open_hand_start_time:
             hold_elapsed = min(time.time() - open_hand_start_time, TOGGLE_GESTURE_DURATION)
             progress_ratio = hold_elapsed / TOGGLE_GESTURE_DURATION
@@ -771,6 +887,16 @@ def main():
             break
         elif key == ord('m'):
             current_mode = "WORD" if current_mode == "SPELL" else "SPELL"
+            word_sequence_buffer.clear()
+            last_word_pred_time = 0.0
+        elif key == ord('s'):
+            current_mode = "WORD"
+            is_recording = True
+            current_word = ""
+            finished_word = ""
+            selecting_punctuation = False
+            punct_sub = None
+            selecting_tense = False
             word_sequence_buffer.clear()
             last_word_pred_time = 0.0
         elif key == ord('v'):
