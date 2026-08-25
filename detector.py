@@ -388,7 +388,26 @@ def main():
             mx, my = mouse_click_pos
             mouse_click_pos = None
 
-            if (w - 410) <= mx <= (w - 280) and 20 <= my <= 55:
+            # toggle start/stop recording button
+            if (w - 550) <= mx <= (w - 420) and 20 <= my <= 55:
+                is_recording = not is_recording
+                if is_recording:
+                    current_word = ""
+                    finished_word = ""
+                    selecting_punctuation = False
+                    punct_sub = None
+                    selecting_tense = False
+                    word_sequence_buffer.clear()
+                    last_word_pred_time = 0.0
+                else:
+                    if current_word.strip():
+                        selecting_punctuation = True
+                        punct_sub = None
+                    else:
+                        finished_word = ""
+                open_hand_start_time = None
+
+            elif (w - 410) <= mx <= (w - 280) and 20 <= my <= 55:
                 current_mode = "WORD" if current_mode == "SPELL" else "SPELL"
                 word_sequence_buffer.clear()
                 last_word_pred_time = 0.0
@@ -560,7 +579,8 @@ def main():
                     space_start_time = None
                     space_triggered = False
 
-                if open_hand and not space_gesture_detected and hand_movement < 0.035:
+                # only trigger open hand gesture in spell mode
+                if current_mode == "SPELL" and open_hand and not space_gesture_detected and hand_movement < 0.035:
                     if open_hand_start_time is None:
                         open_hand_start_time = time.time()
                     elif (time.time() - open_hand_start_time >= TOGGLE_GESTURE_DURATION) and not open_hand_triggered:
@@ -650,6 +670,13 @@ def main():
             current_holding_letter = None
 
         # render controls ui
+        rec_btn_color = (0, 0, 200) if is_recording else (0, 180, 0)
+        rec_btn_text = "STOP" if is_recording else "START"
+        cv2.rectangle(frame, (w - 550, 20), (w - 420, 55), rec_btn_color, -1)
+        cv2.rectangle(frame, (w - 550, 20), (w - 420, 55), (255, 255, 255), 2)
+        cv2.putText(frame, rec_btn_text, (w - 520, 43), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2, cv2.LINE_AA)
+
         mode_color = (0, 165, 255) if current_mode == "SPELL" else (255, 0, 150)
         cv2.rectangle(frame, (w - 410, 20), (w - 280, 55), mode_color, -1)
         cv2.rectangle(frame, (w - 410, 20), (w - 280, 55), (255, 255, 255), 2)
@@ -673,9 +700,10 @@ def main():
 
         instructions = [
             "CONTROLS:",
+            "Start/Stop: Click START/STOP button",
             "Toggle Mode: Click MODE or press 'm'",
             "Start Word Mode: Press 's'",
-            "Start/Finish: Hold STILL open palm up",
+            "Palm Start (Spell): Hold open palm",
             "Space: Hold 2 open palms facing screen",
             "Delete: Click 'DELETE' button",
             "Clear All: Click 'CLEAR' button",
@@ -860,7 +888,7 @@ def main():
                         cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2, cv2.LINE_AA)
 
         # bottom gesture indicators
-        if open_hand_start_time:
+        if open_hand_start_time and current_mode == "SPELL":
             hold_elapsed = min(time.time() - open_hand_start_time, TOGGLE_GESTURE_DURATION)
             progress_ratio = hold_elapsed / TOGGLE_GESTURE_DURATION
             action_text = "finishing..." if is_recording else "starting..."
