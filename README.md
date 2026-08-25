@@ -26,7 +26,7 @@ Day 9: Today I added a .gitignore, got the accuracy up to 97.51%(which I'm reall
 
 Day 10: Lazy day today, I was only able to fix the lag by changing the architecture a bit: I moved emotion detection & asl classification to background thread while keeping mp hand tracking synchronized on the main thread. Tomorrow I will: find out a way to store all past words locally so that somebody else will be able to use my data afterwards, start looking for word datasets that are diverse and  add emotional cues like if suprised/curious look -> question mark etc. Also: I'll try to fix the layout of the demo because I broke it today.
 
-Day 11: Added 2 things: fixed layout i broke yesterday & added emotional punctuation. cues are neutral(.) angry (! (angry)) happy (! (happy)) shocked(?). Tomorrow I will: add the option to choose between a male & a female voice & start looking for word datasets.
+Day 11: Added 2 things: fixed the layout i broke yesterday & added emotional punctuation. cues are neutral(.) angry (! (angry)) happy (! (happy)) shocked(?). Tomorrow I will: add the option to choose between a male & a female voice & start looking for word datasets.
 
 Day 12: i've been SO busy as of late, and have had no time at all to update -- sorry! i added the option to change between male & female voices. tomorrow i will add the option to change punctuation before confirming the final sentecne to change the pronunciation, make the algorithm stop reading (angry) & (happy) and finally increase accuracy to hopefully %99.
 
