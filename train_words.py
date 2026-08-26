@@ -1,6 +1,5 @@
 import matplotlib
-matplotlib.use("Agg")  # MUST be set before importing sklearn or pyplot
-
+matplotlib.use("Agg")  
 import os
 import csv
 import numpy as np
@@ -10,15 +9,30 @@ from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import accuracy_score, classification_report, confusion_matrix, ConfusionMatrixDisplay
 
-def load_dataset(csv_path="asl_words.csv", target_features=4290):
+def load_dataset(csv_path="asl_words.csv"):
     if not os.path.exists(csv_path):
         print(f"error: '{csv_path}' not found. run collect_words.py first.")
         return None, None
 
     labels = []
     features = []
-    padded_count = 0
 
+    # inspect the first row to figure out feature dimension automatically
+    target_features = None
+    with open(csv_path, mode="r", encoding="utf-8") as f:
+        reader = csv.reader(f)
+        for row in reader:
+            if row and len(row) > 1:
+                target_features = len(row) - 1
+                break
+
+    if target_features is None:
+        print("error: no valid data rows found in csv.")
+        return None, None
+
+    print(f"[info] detected target feature vector dimension: {target_features}")
+
+    padded_count = 0
     with open(csv_path, mode="r", encoding="utf-8") as f:
         reader = csv.reader(f)
         for row_idx, row in enumerate(reader):
@@ -32,6 +46,7 @@ def load_dataset(csv_path="asl_words.csv", target_features=4290):
                 print(f"[warning] skipping corrupt row {row_idx + 1}")
                 continue
 
+            # normalize vector sizes across old and new samples
             if len(feat_values) < target_features:
                 feat_values = feat_values + [0.0] * (target_features - len(feat_values))
                 padded_count += 1
@@ -46,7 +61,7 @@ def load_dataset(csv_path="asl_words.csv", target_features=4290):
         return None, None
 
     if padded_count > 0:
-        print(f"[note] automatically padded {padded_count} legacy rows to {target_features} features.")
+        print(f"[note] padded {padded_count} shorter rows to {target_features} features.")
 
     return np.array(features, dtype=np.float32), np.array(labels)
 
@@ -56,7 +71,7 @@ def main():
     cm_output_path = "confusion_matrix.png"
 
     print("--- starting asl word model training ---")
-    x, y = load_dataset(csv_file, target_features=4290)
+    x, y = load_dataset(csv_file)
     
     if x is None or len(x) == 0:
         return
@@ -79,7 +94,7 @@ def main():
     print(f"\ntraining set size: {len(x_train)} | testing set size: {len(x_test)}")
     print("training random forest classifier...")
 
-    clf = RandomForestClassifier(n_estimators=150, max_depth=20, random_state=42, n_jobs=1)
+    clf = RandomForestClassifier(n_estimators=150, max_depth=20, random_state=42, n_jobs=-1)
     clf.fit(x_train, y_train)
 
     y_pred = clf.predict(x_test)
@@ -102,6 +117,7 @@ def main():
     except Exception as e:
         print("could not generate confusion matrix plot:", e)
 
+    # retrain on full dataset before saving
     print("\nretraining classifier on full dataset for maximum coverage...")
     clf.fit(x, y)
 
