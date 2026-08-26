@@ -18,6 +18,30 @@ from train_model import extract_hand_features
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
 
+# face landmark indices for non-manual markers
+KEY_FACE_INDICES = [
+    1,                  # nose tip (anchor point)
+    33, 133, 159, 145,  # left eye
+    362, 263, 386, 374, # right eye
+    70, 63, 105, 66,    # left eyebrow
+    300, 293, 334, 296, # right eyebrow
+    61, 291, 0, 17, 13, 14, # outer & inner mouth
+    78, 308, 82, 312    # lip curves
+]
+
+def extract_face_features(face_landmarks):
+    # return zero array if face drops out frame
+    if not face_landmarks:
+        return [0.0] * (len(KEY_FACE_INDICES) * 3)
+    
+    # normalize relative to nose tip so head movements don't throw off facial expressions
+    nose_tip = np.array([face_landmarks[1].x, face_landmarks[1].y, face_landmarks[1].z])
+    face_feats = []
+    for idx in KEY_FACE_INDICES:
+        lm = face_landmarks[idx]
+        face_feats.extend([lm.x - nose_tip[0], lm.y - nose_tip[1], lm.z - nose_tip[2]])
+    return face_feats
+
 try:
     asl_model = joblib.load('asl_model.pkl')
     print("Loaded ASL alphabet model successfully.")
@@ -72,6 +96,7 @@ def transform_tense(text, target_tense):
         except Exception as e:
             print("LLM Tense conversion api error, falling back to basic rules:", e)
 
+    # basic fallback rules if api fails or key missing
     words = clean.split()
     if not words:
         return text
@@ -254,6 +279,7 @@ class BackgroundAI:
                         raw_pred = self.asl_model.predict([features])[0]
                         local_top_candidates = [(str(raw_pred), 1.0)]
                     
+                    # check wrist trajectory to tell I apart from J
                     if raw_pred in ['I', 'J'] and len(self.wrist_history) == 15:
                         movement = self.wrist_history[0] - self.wrist_history[-1]
                         if movement > 0.05:
@@ -313,6 +339,15 @@ def main():
     )
     detector = vision.HandLandmarker.create_from_options(options)
     
+    # initialize face mesh tracking for facial expressions
+    mp_face_mesh = mp.solutions.face_mesh
+    face_mesh = mp_face_mesh.FaceMesh(
+        max_num_faces=1,
+        refine_landmarks=False,
+        min_detection_confidence=0.55,
+        min_tracking_confidence=0.55
+    )
+
     tts = SpeechEngine()
     bg_ai = BackgroundAI(asl_model)
 
@@ -545,9 +580,15 @@ def main():
 
         detection_result = detector.detect_for_video(mp_image, frame_timestamp_ms)
 
+        # process face landmarks to extract non-manual expressions
+        face_results = face_mesh.process(rgb_frame)
+        face_lms = face_results.multi_face_landmarks[0].landmark if face_results.multi_face_landmarks else None
+        face_feats = extract_face_features(face_lms)
+
         hand_detected = False
         space_gesture_detected = False
         open_hand = False
+        features = None
 
         if detection_result.hand_landmarks:
             valid_hands = [h for h in detection_result.hand_landmarks if is_valid_hand_shape(h)]
@@ -647,9 +688,11 @@ def main():
                     current_holding_letter = predicted_letter
                     letter_hold_start_time = time.time()
 
-            elif current_mode == "WORD" and asl_word_model is not None:
+            elif current_mode == "WORD" and asl_word_model is not None and features is not None:
                 if time.time() - last_word_pred_time >= WORD_COOLDOWN_DURATION:
-                    word_sequence_buffer.append(features)
+                    # combine hand features and face features per frame for word mode
+                    combined_frame_feats = list(features) + list(face_feats)
+                    word_sequence_buffer.append(combined_frame_feats)
 
                     if len(word_sequence_buffer) == 30:
                         flat_sequence = np.array(word_sequence_buffer).flatten()
