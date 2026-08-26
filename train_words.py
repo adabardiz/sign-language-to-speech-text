@@ -17,7 +17,6 @@ def load_dataset(csv_path="asl_words.csv"):
     labels = []
     features = []
 
-    # inspect the first row to figure out feature dimension automatically
     target_features = None
     with open(csv_path, mode="r", encoding="utf-8") as f:
         reader = csv.reader(f)
@@ -46,7 +45,6 @@ def load_dataset(csv_path="asl_words.csv"):
                 print(f"[warning] skipping corrupt row {row_idx + 1}")
                 continue
 
-            # normalize vector sizes across old and new samples
             if len(feat_values) < target_features:
                 feat_values = feat_values + [0.0] * (target_features - len(feat_values))
                 padded_count += 1
@@ -117,7 +115,6 @@ def main():
     except Exception as e:
         print("could not generate confusion matrix plot:", e)
 
-    # retrain on full dataset before saving
     print("\nretraining classifier on full dataset for maximum coverage...")
     clf.fit(x, y)
 
