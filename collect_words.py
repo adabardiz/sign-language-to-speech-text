@@ -17,6 +17,30 @@ HAND_CONNECTIONS = [
     (0, 5), (5, 9), (9, 13), (13, 17), (0, 17) # palm
 ]
 
+# key face landmarks for non-manual markers (nose, eyes, eyebrows, lips)
+KEY_FACE_INDICES = [
+    1,                  # nose tip (anchor point)
+    33, 133, 159, 145,  # left eye
+    362, 263, 386, 374, # right eye
+    70, 63, 105, 66,    # left eyebrow
+    300, 293, 334, 296, # right eyebrow
+    61, 291, 0, 17, 13, 14, # outer & inner mouth
+    78, 308, 82, 312    # lip curves
+]
+
+def extract_face_features(face_landmarks):
+    # return zero array if face disappears mid-sequence
+    if not face_landmarks:
+        return [0.0] * (len(KEY_FACE_INDICES) * 3)
+    
+    # normalize points relative to nose tip so head movements don't mess up expressions
+    nose_tip = np.array([face_landmarks[1].x, face_landmarks[1].y, face_landmarks[1].z])
+    face_feats = []
+    for idx in KEY_FACE_INDICES:
+        lm = face_landmarks[idx]
+        face_feats.extend([lm.x - nose_tip[0], lm.y - nose_tip[1], lm.z - nose_tip[2]])
+    return face_feats
+
 def is_valid_hand_shape(landmarks):
     wrist = np.array([landmarks[0].x, landmarks[0].y])
     middle_mcp = np.array([landmarks[9].x, landmarks[9].y])
@@ -29,6 +53,7 @@ def append_sample_to_csv(filepath, row_data):
             writer = csv.writer(f)
             writer.writerow(row_data)
     except Exception as e:
+        # fallback to home dir backup if write permissions fail
         backup_path = os.path.expanduser("~/asl_words_backup.csv")
         print(f"[warning] could not write to {filepath} ({e}). writing to backup {backup_path}")
         with open(backup_path, mode="a", newline="", encoding="utf-8") as f:
@@ -51,6 +76,7 @@ def delete_last_csv_row(filepath):
         return False
 
 def main():
+    # hand tracker config
     base_options = python.BaseOptions(model_asset_path="hand_landmarker.task")
     options = vision.HandLandmarkerOptions(
         base_options=base_options, 
@@ -62,8 +88,21 @@ def main():
     )
     detector = vision.HandLandmarker.create_from_options(options)
 
+    # face mesh config for facial expressions
+    mp_face_mesh = mp.solutions.face_mesh
+    face_mesh = mp_face_mesh.FaceMesh(
+        max_num_faces=1,
+        refine_landmarks=False,
+        min_detection_confidence=0.55,
+        min_tracking_confidence=0.55
+    )
+
+    # calculate total vector size per frame (hands + face)
     dummy_pts = np.zeros((21, 3))
-    num_features_per_frame = len(extract_hand_features(dummy_pts))
+    num_hand_features = len(extract_hand_features(dummy_pts))
+    num_face_features = len(KEY_FACE_INDICES) * 3
+    num_features_per_frame = num_hand_features + num_face_features
+
     frames_per_sample = 30
     target_total_features = frames_per_sample * num_features_per_frame
 
@@ -156,15 +195,15 @@ def main():
                 frame_timestamp_ms = last_timestamp_ms + 1
             last_timestamp_ms = frame_timestamp_ms
 
+            # 1. extract hand landmarks
             detection_result = detector.detect_for_video(mp_image, frame_timestamp_ms)
-
-            feats = None
+            hand_feats = None
             if detection_result.hand_landmarks:
                 valid_hands = [hand for hand in detection_result.hand_landmarks if is_valid_hand_shape(hand)]
                 if valid_hands:
                     primary_hand = valid_hands[0]
                     pts = np.array([[lm.x, lm.y, lm.z] for lm in primary_hand])
-                    feats = extract_hand_features(pts)
+                    hand_feats = extract_hand_features(pts)
 
                     for hand_landmarks in valid_hands:
                         for connection in HAND_CONNECTIONS:
@@ -174,10 +213,22 @@ def main():
                         for lm in hand_landmarks:
                             cv2.circle(frame, (int(lm.x * w), int(lm.y * h)), 4, (0, 255, 0), -1)
 
-            if feats is None:
-                feats = [0.0] * num_features_per_frame
+            if hand_feats is None:
+                hand_feats = [0.0] * num_hand_features
 
-            sequence_features.extend(feats)
+            #extract face landmarks
+            face_results = face_mesh.process(rgb_frame)
+            face_lms = face_results.multi_face_landmarks[0].landmark if face_results.multi_face_landmarks else None
+            face_feats = extract_face_features(face_lms)
+
+            if face_lms:
+                for idx in KEY_FACE_INDICES:
+                    lm = face_lms[idx]
+                    cv2.circle(frame, (int(lm.x * w), int(lm.y * h)), 2, (0, 255, 255), -1)
+
+            #concatenate hand and face features for this frame
+            frame_feats = list(hand_feats) + list(face_feats)
+            sequence_features.extend(frame_feats)
 
             recorded_frames = len(sequence_features) // num_features_per_frame
             cv2.putText(frame, f"RECORDING '{word_to_record}'... {recorded_frames}/{frames_per_sample}", 
