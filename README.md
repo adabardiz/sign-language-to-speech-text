@@ -10,7 +10,7 @@ Day 1: initial setup w/ openCV & yolov9 detector script
 
 Day 2: integrated mediapipe tasks API hand landmarker, custom 21 point joint overlay, & realtime ui buffer
 
-Day 3: rf ml pipeline & live asl gesture classifier alphabet only at the moment. Will try to re-incorporate the emotions classifier & real words into the model tomorrow.
+Day 3: rf ml pipeline & live asl gesture classifier alphabet only at the moment. I'll try to re-incorporate the emotions classifier & real words into the model tomorrow.
 
 Day 4: longer update today! normalized ASL hand landmarks relative to the wrist & trained a rf model for position independent gesture recognition. added a 7 frame rolling prediction buffer to smooth live webcam outputs & eliminate prediction jitter. will try to do aforementioned things in day 3 tomorrow as well as improve accuracy as it's at 80.05 rn...
 
