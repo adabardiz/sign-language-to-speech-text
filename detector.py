@@ -39,6 +39,16 @@ def extract_face_features(face_landmarks):
         face_feats.extend([lm.x - nose_tip[0], lm.y - nose_tip[1], lm.z - nose_tip[2]])
     return face_feats
 
+def aggregate_sequence(sequence_matrix):
+    # matches the summary vector logic used during training
+    seq = np.array(sequence_matrix, dtype=np.float32)
+    mean_f = np.mean(seq, axis=0)
+    std_f = np.std(seq, axis=0)
+    delta_f = seq[-1] - seq[0]
+    max_f = np.max(seq, axis=0)
+    min_f = np.min(seq, axis=0)
+    return np.hstack([mean_f, std_f, delta_f, max_f, min_f])
+
 try:
     asl_model = joblib.load('asl_model.pkl')
     print("Loaded ASL alphabet model successfully.")
@@ -336,7 +346,6 @@ def main():
     is_converting_tense = False
     temp_sentence = ""
 
-    # Synonym selection modal state
     selecting_synonym = False
     synonym_options = []
 
@@ -416,14 +425,12 @@ def main():
 
             elif selecting_synonym:
                 btn_y1, btn_y2 = cy - 10, cy + 50
-                # Option 1 (Left)
                 if (cx - 210) <= mx <= (cx - 10) and btn_y1 <= my <= btn_y2 and len(synonym_options) >= 1:
                     chosen = synonym_options[0]
                     current_word += f"{chosen} "
                     tts.speak(chosen, tone=selected_tone)
                     selecting_synonym = False
                     synonym_options = []
-                # Option 2 (Right)
                 elif (cx + 10) <= mx <= (cx + 210) and btn_y1 <= my <= btn_y2 and len(synonym_options) >= 2:
                     chosen = synonym_options[1]
                     current_word += f"{chosen} "
@@ -602,9 +609,10 @@ def main():
                     word_sequence_buffer.append(combined_frame_feats)
 
                     if len(word_sequence_buffer) == 30:
-                        flat_sequence = np.array(word_sequence_buffer).flatten()
+                        # aggregate sequence buffer into summary vector before prediction
+                        aggregated_vec = aggregate_sequence(word_sequence_buffer)
                         try:
-                            predicted_word = asl_word_model.predict([flat_sequence])[0]
+                            predicted_word = asl_word_model.predict([aggregated_vec])[0]
                             if predicted_word:
                                 if "/" in predicted_word:
                                     synonym_options = [w.strip() for w in predicted_word.split("/") if w.strip()]
@@ -688,7 +696,6 @@ def main():
             cv2.putText(frame, f"[recording mode - {current_mode}]", (40, 165), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2, cv2.LINE_AA)
             cv2.putText(frame, f"word: {current_word}_", (40, 205), cv2.FONT_HERSHEY_SIMPLEX, 1.1, (255, 0, 255), 3, cv2.LINE_AA)
 
-        # Synonym selection popup overlay
         if selecting_synonym:
             box_w, box_h = 550, 180
             m_x1, m_y1 = cx - box_w // 2, cy - box_h // 2
@@ -719,7 +726,6 @@ def main():
                 cv2.putText(frame, opt2, (cx + 110 - s_size[0] // 2, cy + 22), 
                             cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 2, cv2.LINE_AA)
 
-        # Punctuation selection modal
         if selecting_punctuation:
             box_w, box_h = 750, 200
             m_x1, m_y1 = cx - box_w // 2, cy - box_h // 2
@@ -792,7 +798,6 @@ def main():
                 cv2.rectangle(frame, (cx + 10, btn_y1), (cx + 200, btn_y1 + btn_h), (255, 255, 255), 1)
                 cv2.putText(frame, "SARCASTIC", (cx + 25, btn_y1 + 55), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 2, cv2.LINE_AA)
 
-        # Tense selection modal
         if selecting_tense:
             box_w, box_h = 600, 260
             m_x1, m_y1 = cx - box_w // 2, cy - box_h // 2
