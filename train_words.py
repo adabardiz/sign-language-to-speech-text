@@ -9,115 +9,110 @@ from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import accuracy_score, classification_report, confusion_matrix, ConfusionMatrixDisplay
 
+FRAMES_PER_SAMPLE = 30
+
+def aggregate_sequence(sequence_matrix):
+    # flatten 30 frames into a aggregate vector so exact timing doesn't mess up predictions
+    seq = np.array(sequence_matrix, dtype=np.float32)
+    mean_f = np.mean(seq, axis=0)       # average hand position
+    std_f = np.std(seq, axis=0)         # movement variance
+    delta_f = seq[-1] - seq[0]          # total displacement from start to end
+    max_f = np.max(seq, axis=0)         # peak hand coordinates
+    min_f = np.min(seq, axis=0)         # min hand coordinates
+    
+    return np.hstack([mean_f, std_f, delta_f, max_f, min_f])
+
+def augment_sequence(seq_matrix):
+    # generate fake training variations to boost accuracy without re-recording
+    augmented = []
+    seq = np.array(seq_matrix, dtype=np.float32)
+    
+    # original raw sequence
+    augmented.append(aggregate_sequence(seq))
+    
+    # subtle hand jitter/noise
+    noise = np.random.normal(0, 0.004, seq.shape)
+    augmented.append(aggregate_sequence(seq + noise))
+    
+    # slight scale tweak (simulates hand being closer or farther)
+    scale = np.random.uniform(0.95, 1.05)
+    augmented.append(aggregate_sequence(seq * scale))
+
+    # speed warping (simulates signing slightly faster or slower)
+    indices_fast = np.linspace(0, FRAMES_PER_SAMPLE - 1, FRAMES_PER_SAMPLE, dtype=int)
+    shift = np.random.choice([-1, 1], size=FRAMES_PER_SAMPLE)
+    indices_warped = np.clip(indices_fast + shift, 0, FRAMES_PER_SAMPLE - 1)
+    augmented.append(aggregate_sequence(seq[indices_warped]))
+
+    return augmented
+
 def load_dataset(csv_path="asl_words.csv"):
     if not os.path.exists(csv_path):
-        print(f"error: '{csv_path}' not found. run collect_words.py first.")
+        print(f"error: '{csv_path}' not found.")
         return None, None
 
     labels = []
     features = []
 
-    target_features = None
-    with open(csv_path, mode="r", encoding="utf-8") as f:
-        reader = csv.reader(f)
-        for row in reader:
-            if row and len(row) > 1:
-                target_features = len(row) - 1
-                break
-
-    if target_features is None:
-        print("error: no valid data rows found in csv.")
-        return None, None
-
-    print(f"[info] detected target feature vector dimension: {target_features}")
-
-    padded_count = 0
     with open(csv_path, mode="r", encoding="utf-8") as f:
         reader = csv.reader(f)
         for row_idx, row in enumerate(reader):
-            if not row:
+            if not row or len(row) <= 1:
                 continue
             
             label = row[0].strip().upper()
             try:
                 feat_values = [float(val) for val in row[1:]]
             except ValueError:
-                print(f"[warning] skipping corrupt row {row_idx + 1}")
                 continue
 
-            if len(feat_values) < target_features:
-                feat_values = feat_values + [0.0] * (target_features - len(feat_values))
-                padded_count += 1
-            elif len(feat_values) > target_features:
-                feat_values = feat_values[:target_features]
+            # make sure row length splits evenly across 30 frames
+            total_vals = len(feat_values)
+            num_features_per_frame = total_vals // FRAMES_PER_SAMPLE
+            truncated_len = num_features_per_frame * FRAMES_PER_SAMPLE
+            
+            raw_seq = np.array(feat_values[:truncated_len]).reshape(FRAMES_PER_SAMPLE, num_features_per_frame)
 
-            labels.append(label)
-            features.append(feat_values)
+            # augment and aggregate sequences
+            aug_features = augment_sequence(raw_seq)
+            for feat_vec in aug_features:
+                labels.append(label)
+                features.append(feat_vec)
 
     if not labels:
         print("error: no valid data rows found in csv.")
         return None, None
 
-    if padded_count > 0:
-        print(f"[note] padded {padded_count} shorter rows to {target_features} features.")
-
+    print(f"[info] generated {len(features)} total augmented samples from CSV.")
     return np.array(features, dtype=np.float32), np.array(labels)
 
 def main():
     csv_file = "asl_words.csv"
     model_output_path = "asl_word_model.pkl"
-    cm_output_path = "confusion_matrix.png"
 
-    print("--- starting asl word model training ---")
+    print("--- starting augmented asl word model training ---")
     x, y = load_dataset(csv_file)
     
     if x is None or len(x) == 0:
         return
 
     unique_classes, counts = np.unique(y, return_counts=True)
-    print(f"\nloaded {len(x)} total samples across {len(unique_classes)} word classes:")
+    print(f"\nclasses & sample counts after augmentation:")
     for cls, cnt in zip(unique_classes, counts):
         print(f" - {cls}: {cnt} samples")
 
-    can_stratify = all(cnt >= 2 for cnt in counts)
-    stratify_param = y if can_stratify else None
-
-    if not can_stratify:
-        print("\n[note] some classes have fewer than 2 samples; disabling stratification.")
-
     x_train, x_test, y_train, y_test = train_test_split(
-        x, y, test_size=0.2, random_state=42, stratify=stratify_param
+        x, y, test_size=0.2, random_state=42, stratify=y
     )
 
-    print(f"\ntraining set size: {len(x_train)} | testing set size: {len(x_test)}")
-    print("training random forest classifier...")
-
-    clf = RandomForestClassifier(n_estimators=150, max_depth=20, random_state=42, n_jobs=-1)
+    clf = RandomForestClassifier(n_estimators=200, max_depth=25, random_state=42, n_jobs=-1)
     clf.fit(x_train, y_train)
 
     y_pred = clf.predict(x_test)
     acc = accuracy_score(y_test, y_pred)
     print(f"\n---> model test accuracy: {acc * 100:.2f}% <---")
 
-    print("\nclassification report:")
-    print(classification_report(y_test, y_pred, zero_division=0))
-
-    try:
-        cm = confusion_matrix(y_test, y_pred, labels=clf.classes_)
-        disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=clf.classes_)
-        fig, ax = plt.subplots(figsize=(10, 8))
-        disp.plot(ax=ax, cmap="Blues", xticks_rotation=45)
-        plt.title("asl word recognition confusion matrix")
-        plt.tight_layout()
-        plt.savefig(cm_output_path)
-        plt.close("all")
-        print(f"saved confusion matrix plot to '{cm_output_path}'")
-    except Exception as e:
-        print("could not generate confusion matrix plot:", e)
-
-    print("\nretraining classifier on full dataset for maximum coverage...")
     clf.fit(x, y)
-
     joblib.dump(clf, model_output_path, compress=3)
     print(f"successfully saved updated model to '{model_output_path}'!")
 
