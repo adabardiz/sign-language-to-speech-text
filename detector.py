@@ -40,7 +40,6 @@ def extract_face_features(face_landmarks):
     return face_feats
 
 def aggregate_sequence(sequence_matrix):
-    # matches the summary vector logic used during training
     seq = np.array(sequence_matrix, dtype=np.float32)
     mean_f = np.mean(seq, axis=0)
     std_f = np.std(seq, axis=0)
@@ -88,10 +87,25 @@ def transform_tense(text, target_tense):
     if gemini_key:
         try:
             url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={gemini_key}"
+            
+            tense_instructions = {
+                "NOW": "present continuous tense (e.g., 'I am going', 'She is eating')",
+                "PAST": "simple past tense (e.g., 'I went', 'She ate')",
+                "FUTURE": "future tense using 'will' or 'going to' (e.g., 'I will go')",
+                "PRESENT": "simple present tense (e.g., 'I go', 'She eats')"
+            }
+            target_desc = tense_instructions.get(target_tense, target_tense.lower())
+
             prompt = (
-                f"Convert the following ASL gloss / sentence to grammatically natural English in the {target_tense.lower()} tense. "
-                f"Return ONLY the updated sentence, nothing else.\nSentence: '{clean}'"
+                f"You are a sign language translator. Convert this raw ASL gloss/phrase into fluent, "
+                f"grammatically correct English in the {target_desc}.\n"
+                f"Guidelines:\n"
+                f"- Fix missing prepositions, articles (a, an, the), and ASL word order.\n"
+                f"- Do not add extra commentary or explanation.\n"
+                f"- Output ONLY the converted sentence.\n\n"
+                f"ASL Input: '{clean}'"
             )
+
             payload = json.dumps({"contents": [{"parts": [{"text": prompt}]}]}).encode('utf-8')
             req = urllib.request.Request(url, data=payload, headers={'Content-Type': 'application/json'})
             with urllib.request.urlopen(req, timeout=3) as resp:
@@ -103,23 +117,27 @@ def transform_tense(text, target_tense):
         except Exception as e:
             print("LLM Tense conversion api error:", e)
 
-    words = clean.split()
+    words = clean.lower().split()
     if not words:
         return text
 
-    first_word = words[0].lower()
+    pronouns = {"i", "you", "he", "she", "we", "they", "it"}
+    first = words[0]
     rest = " ".join(words[1:]) if len(words) > 1 else ""
 
-    if target_tense == "FUTURE":
-        res = f"{words[0]} will {rest}".strip() if first_word in ["i", "you", "he", "she", "we", "they", "it"] else f"will {clean}".strip()
+    if target_tense == "NOW":
+        aux = "am" if first == "i" else ("is" if first in ["he", "she", "it"] else "are")
+        res = f"{words[0]} {aux} {rest}".strip() if first in pronouns else f"is {clean}".strip()
+    elif target_tense == "FUTURE":
+        res = f"{words[0]} will {rest}".strip() if first in pronouns else f"will {clean}".strip()
     elif target_tense == "PAST":
-        res = f"{words[0]} did {rest}".strip() if first_word in ["i", "you", "he", "she", "we", "they", "it"] else f"did {clean}".strip()
+        res = f"{words[0]} went/did {rest}".strip() if first in pronouns else f"did {clean}".strip()
     else:
         res = clean
 
     if punct and not res.endswith(punct):
         res += punct
-    return res
+    return res.capitalize()
 
 class WebcamVideoStream:
     def __init__(self, src=0):
@@ -478,7 +496,7 @@ def main():
             elif selecting_tense and not is_converting_tense:
                 chosen_tense = None
                 if (cy - 10) <= my <= (cy + 35):
-                    if (cx - 210) <= mx <= (cx - 10): chosen_tense = "PRESENT"
+                    if (cx - 210) <= mx <= (cx - 10): chosen_tense = "NOW"
                     elif (cx + 10) <= mx <= (cx + 210): chosen_tense = "PAST"
                 elif (cy + 50) <= my <= (cy + 95):
                     if (cx - 210) <= mx <= (cx - 10): chosen_tense = "FUTURE"
@@ -609,7 +627,6 @@ def main():
                     word_sequence_buffer.append(combined_frame_feats)
 
                     if len(word_sequence_buffer) == 30:
-                        # aggregate sequence buffer into summary vector before prediction
                         aggregated_vec = aggregate_sequence(word_sequence_buffer)
                         try:
                             predicted_word = asl_word_model.predict([aggregated_vec])[0]
@@ -818,7 +835,7 @@ def main():
 
             cv2.rectangle(frame, (cx - 210, cy - 10), (cx - 10, cy - 10 + btn_h), (0, 160, 0), -1)
             cv2.rectangle(frame, (cx - 210, cy - 10), (cx - 10, cy - 10 + btn_h), (255, 255, 255), 1)
-            cv2.putText(frame, "PRESENT", (cx - 160, cy + 18), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 2, cv2.LINE_AA)
+            cv2.putText(frame, "NOW (-ing)", (cx - 170, cy + 18), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 2, cv2.LINE_AA)
 
             cv2.rectangle(frame, (cx + 10, cy - 10), (cx + 210, cy - 10 + btn_h), (180, 100, 0), -1)
             cv2.rectangle(frame, (cx + 10, cy - 10), (cx + 210, cy - 10 + btn_h), (255, 255, 255), 1)
