@@ -51,3 +51,5 @@ Day 21: Our repository is old enough to drink in the US!! On a more serious note
 Day 22: I have a flight in two hours and I've not left my house (so sad). I added face tracking to collect_words.py and updated train_words.py and detector.py accordingly. I then added the synonym model. I've yet to try them (again, no time). Tomorrow I hope I'll have time to add a few words to the dataset, learn more abt asl grammar & make the tense transformer better, and fix the accuracy for words.
 
 Day 23: No time to update -- I basically made the tense transformer better by adding present continous tense etc, sharpening up the gemini prompt and a few more things. I also fixed the accuracy for words (or atleast I tried). Tomorrow: I'll add 5-6 words to the dataset, and make the ui cuter?? Idk I feel like from here on out I'll just chill and amass a big dataset.
+
+Day 24: Bro I found out that none of my commits have been verified smh I just got a ssh key. Anyway, today I redesigned the ui to be more warm/ minimalistic. Tomorrow I'll add more words -- from here, I'm going to have shorter updates and just add more words.
