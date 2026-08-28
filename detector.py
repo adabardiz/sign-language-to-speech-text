@@ -18,6 +18,72 @@ from train_model import extract_hand_features
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
 
+# warm minimalist color palette (bgr format)
+COLOR_BG_CARD    = (235, 238, 240)  
+COLOR_TEXT_DARK  = (42, 42, 42)     
+COLOR_TEXT_MUTED = (120, 120, 120)  
+COLOR_TERRACOTTA = (60, 110, 195)   
+COLOR_SAGE       = (120, 160, 100)  
+COLOR_ROSE       = (90, 90, 200)    
+COLOR_SAND       = (210, 215, 220)  
+COLOR_BORDER     = (180, 185, 190)  
+COLOR_OVERLAY_BG = (245, 247, 248)  
+
+# ui drawing helper functions
+def draw_rounded_rect(img, pt1, pt2, color, thickness=-1, radius=10):
+    x1, y1 = pt1
+    x2, y2 = pt2
+    w = x2 - x1
+    h = y2 - y1
+    r = min(radius, w // 2, h // 2)
+
+    if thickness < 0:
+        cv2.rectangle(img, (x1 + r, y1), (x2 - r, y2), color, -1)
+        cv2.rectangle(img, (x1, y1 + r), (x2, y2 - r), color, -1)
+        cv2.circle(img, (x1 + r, y1 + r), r, color, -1)
+        cv2.circle(img, (x2 - r, y1 + r), r, color, -1)
+        cv2.circle(img, (x1 + r, y2 - r), r, color, -1)
+        cv2.circle(img, (x2 - r, y2 - r), r, color, -1)
+    else:
+        cv2.line(img, (x1 + r, y1), (x2 - r, y1), color, thickness, cv2.LINE_AA)
+        cv2.line(img, (x1 + r, y2), (x2 - r, y2), color, thickness, cv2.LINE_AA)
+        cv2.line(img, (x1, y1 + r), (x1, y2 - r), color, thickness, cv2.LINE_AA)
+        cv2.line(img, (x2, y1 + r), (x2, y2 - r), color, thickness, cv2.LINE_AA)
+        cv2.ellipse(img, (x1 + r, y1 + r), (r, r), 180, 0, 90, color, thickness, cv2.LINE_AA)
+        cv2.ellipse(img, (x2 - r, y1 + r), (r, r), 270, 0, 90, color, thickness, cv2.LINE_AA)
+        cv2.ellipse(img, (x1 + r, y2 - r), (r, r), 90, 0, 90, color, thickness, cv2.LINE_AA)
+        cv2.ellipse(img, (x2 - r, y2 - r), (r, r), 0, 0, 90, color, thickness, cv2.LINE_AA)
+
+def draw_pill_button(img, pt1, pt2, bg_color, text, text_color=COLOR_TEXT_DARK, font_scale=0.5, radius=8):
+    draw_rounded_rect(img, pt1, pt2, bg_color, thickness=-1, radius=radius)
+    draw_rounded_rect(img, pt1, pt2, COLOR_BORDER, thickness=1, radius=radius)
+    
+    x1, y1 = pt1
+    x2, y2 = pt2
+    w, h = x2 - x1, y2 - y1
+    
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    (tw, th), _ = cv2.getTextSize(text, font, font_scale, 1)
+    tx = x1 + (w - tw) // 2
+    ty = y1 + (h + th) // 2 - 1
+    cv2.putText(img, text, (tx, ty), font, font_scale, text_color, 1, cv2.LINE_AA)
+
+def draw_progress_bar(img, pt1, pt2, progress_ratio, color=COLOR_TERRACOTTA):
+    x1, y1 = pt1
+    x2, y2 = pt2
+    w = x2 - x1
+    h = y2 - y1
+    
+    # track background
+    draw_rounded_rect(img, (x1, y1), (x2, y2), COLOR_SAND, thickness=-1, radius=h // 2)
+    
+    # filled progress
+    if progress_ratio > 0.01:
+        fill_w = int(w * min(max(progress_ratio, 0.0), 1.0))
+        if fill_w > h:
+            draw_rounded_rect(img, (x1, y1), (x1 + fill_w, y2), color, thickness=-1, radius=h // 2)
+
+# model & feature extraction setup
 KEY_FACE_INDICES = [
     1,                  # nose tip anchor
     33, 133, 159, 145,  # left eye
@@ -309,6 +375,7 @@ def is_open_hand(hand_landmarks):
 def is_two_open_hands(hand1, hand2):
     return is_open_hand(hand1) and is_open_hand(hand2)
 
+# main execution loop
 def main():
     base_options = python.BaseOptions(model_asset_path='hand_landmarker.task')
     options = vision.HandLandmarkerOptions(
@@ -339,7 +406,7 @@ def main():
         print("Error: Could not open webcam.")
         return
 
-    window_name = "sign language ai - live classifier"
+    window_name = "Sign Language Translator"
     cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
     cv2.setWindowProperty(window_name, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
 
@@ -533,6 +600,7 @@ def main():
                     finished_word = ""
                     current_word = ""
 
+        # vision pipeline & gesture recognition
         rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb_frame)
         
@@ -600,9 +668,9 @@ def main():
                     for connection in HAND_CONNECTIONS:
                         start_p = (int(hand_landmarks[connection[0]].x * w), int(hand_landmarks[connection[1]].y * h))
                         end_p = (int(hand_landmarks[connection[1]].x * w), int(hand_landmarks[connection[1]].y * h))
-                        cv2.line(frame, start_p, end_p, (255, 255, 255), 2)
+                        cv2.line(frame, start_p, end_p, (230, 235, 240), 2, cv2.LINE_AA)
                     for landmark in hand_landmarks:
-                        cv2.circle(frame, (int(landmark.x * w), int(landmark.y * h)), 4, (0, 255, 0), -1)
+                        cv2.circle(frame, (int(landmark.x * w), int(landmark.y * h)), 4, COLOR_TERRACOTTA, -1, cv2.LINE_AA)
             else:
                 bg_ai.update_data(None, None)
                 open_hand_start_time, space_start_time, letter_hold_start_time, current_holding_letter, prev_wrist_pos = None, None, None, None, None
@@ -647,228 +715,197 @@ def main():
         else:
             letter_hold_start_time, current_holding_letter = None, None
 
-        rec_btn_color = (0, 0, 200) if is_recording else (0, 180, 0)
+
+        # top control buttons
+        rec_bg = COLOR_SAGE if not is_recording else COLOR_ROSE
+        rec_txt_color = (255, 255, 255)
         rec_btn_text = "STOP" if is_recording else "START"
-        cv2.rectangle(frame, (w - 550, 20), (w - 420, 55), rec_btn_color, -1)
-        cv2.rectangle(frame, (w - 550, 20), (w - 420, 55), (255, 255, 255), 2)
-        cv2.putText(frame, rec_btn_text, (w - 520, 43), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2, cv2.LINE_AA)
+        draw_pill_button(frame, (w - 550, 20), (w - 420, 55), rec_bg, rec_btn_text, text_color=rec_txt_color, font_scale=0.55)
 
-        mode_color = (0, 165, 255) if current_mode == "SPELL" else (255, 0, 150)
-        cv2.rectangle(frame, (w - 410, 20), (w - 280, 55), mode_color, -1)
-        cv2.rectangle(frame, (w - 410, 20), (w - 280, 55), (255, 255, 255), 2)
-        cv2.putText(frame, f"MODE: {current_mode}", (w - 400, 43), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 255), 2, cv2.LINE_AA)
+        mode_bg = COLOR_TERRACOTTA if current_mode == "SPELL" else COLOR_SAND
+        mode_txt_color = (255, 255, 255) if current_mode == "SPELL" else COLOR_TEXT_DARK
+        draw_pill_button(frame, (w - 410, 20), (w - 280, 55), mode_bg, f"MODE: {current_mode}", text_color=mode_txt_color, font_scale=0.45)
 
-        cv2.rectangle(frame, (w - 140, 20), (w - 20, 55), (0, 0, 200), -1)
-        cv2.rectangle(frame, (w - 140, 20), (w - 20, 55), (255, 255, 255), 2)
-        cv2.putText(frame, "CLEAR", (w - 110, 43), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2, cv2.LINE_AA)
+        draw_pill_button(frame, (w - 270, 20), (w - 150, 55), COLOR_SAND, "DELETE", text_color=COLOR_TEXT_DARK, font_scale=0.55)
+        draw_pill_button(frame, (w - 140, 20), (w - 20, 55), COLOR_ROSE, "CLEAR", text_color=(255, 255, 255), font_scale=0.55)
 
-        cv2.rectangle(frame, (w - 270, 20), (w - 150, 55), (0, 100, 200), -1)
-        cv2.rectangle(frame, (w - 270, 20), (w - 150, 55), (255, 255, 255), 2)
-        cv2.putText(frame, "DELETE", (w - 245, 43), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2, cv2.LINE_AA)
-
+        # controls panel
         box_x1, box_y1 = w - 300, 75
-        box_x2, box_y2 = w - 20, 280 
-        cv2.rectangle(frame, (box_x1, box_y1), (box_x2, box_y2), (30, 30, 30), -1)
-        cv2.rectangle(frame, (box_x1, box_y1), (box_x2, box_y2), (255, 255, 255), 1)
+        box_x2, box_y2 = w - 20, 310
+        draw_rounded_rect(frame, (box_x1, box_y1), (box_x2, box_y2), COLOR_BG_CARD, thickness=-1, radius=12)
+        draw_rounded_rect(frame, (box_x1, box_y1), (box_x2, box_y2), COLOR_BORDER, thickness=1, radius=12)
 
         instructions = [
-            "CONTROLS:",
-            "Start/Stop: Click START/STOP button",
-            "Toggle Mode: Click MODE or press 'm'",
+            "CONTROLS",
+            "Start/Stop: Click START/STOP",
+            "Toggle Mode: Click MODE / 'm'",
             "Start Word Mode: Press 's'",
-            "Palm Start (Spell): Hold open palm",
-            "Space: Hold 2 open palms facing screen",
-            "Delete: Click 'DELETE' button",
-            "Clear All: Click 'CLEAR' button",
-            "Type Letter: Hold sign for 2s",
-            "Press 'v' to toggle Voice",
-            "Press 'q' to quit."
+            "Palm Start: Hold open palm",
+            "Space: Hold 2 open palms",
+            "Delete: Click DELETE",
+            "Clear All: Click CLEAR",
+            "Type Letter: Hold sign 2s",
+            "Toggle Voice: Press 'v'",
+            "Quit App: Press 'q'"
         ]
 
         for idx, line_text in enumerate(instructions):
-            y_pos = box_y1 + 18 + (idx * 20)
-            text_color = (0, 255, 255) if idx == 0 else (255, 255, 255)
-            cv2.putText(frame, line_text, (box_x1 + 10, y_pos), cv2.FONT_HERSHEY_SIMPLEX, 0.42, text_color, 1, cv2.LINE_AA)
+            y_pos = box_y1 + 22 + (idx * 20)
+            if idx == 0:
+                cv2.putText(frame, line_text, (box_x1 + 14, y_pos), cv2.FONT_HERSHEY_SIMPLEX, 0.45, COLOR_TEXT_DARK, 2, cv2.LINE_AA)
+            else:
+                cv2.putText(frame, line_text, (box_x1 + 14, y_pos), cv2.FONT_HERSHEY_SIMPLEX, 0.40, COLOR_TEXT_MUTED, 1, cv2.LINE_AA)
 
-        cv2.putText(frame, f"sign: {predicted_letter}", (40, 50), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 0), 2, cv2.LINE_AA)
+        draw_rounded_rect(frame, (20, 20), (220, 65), COLOR_BG_CARD, thickness=-1, radius=10)
+        draw_rounded_rect(frame, (20, 20), (220, 65), COLOR_BORDER, thickness=1, radius=10)
+        cv2.putText(frame, "CURRENT SIGN", (32, 36), cv2.FONT_HERSHEY_SIMPLEX, 0.38, COLOR_TEXT_MUTED, 1, cv2.LINE_AA)
+        cv2.putText(frame, f"{predicted_letter}", (32, 58), cv2.FONT_HERSHEY_SIMPLEX, 0.7, COLOR_TEXT_DARK, 2, cv2.LINE_AA)
 
+        # floating voice indicator card
+        draw_rounded_rect(frame, (230, 20), (430, 65), COLOR_BG_CARD, thickness=-1, radius=10)
+        draw_rounded_rect(frame, (230, 20), (430, 65), COLOR_BORDER, thickness=1, radius=10)
+        cv2.putText(frame, "VOICE ENGINE", (242, 36), cv2.FONT_HERSHEY_SIMPLEX, 0.38, COLOR_TEXT_MUTED, 1, cv2.LINE_AA)
+        cv2.putText(frame, f"{tts.current_voice_label}", (242, 58), cv2.FONT_HERSHEY_SIMPLEX, 0.65, COLOR_TERRACOTTA, 2, cv2.LINE_AA)
+
+        if is_recording:
+            draw_rounded_rect(frame, (20, 80), (430, 160), COLOR_BG_CARD, thickness=-1, radius=12)
+            draw_rounded_rect(frame, (20, 80), (430, 160), COLOR_BORDER, thickness=1, radius=12)
+            
+            cv2.putText(frame, f"RECORDING ({current_mode})", (32, 102), cv2.FONT_HERSHEY_SIMPLEX, 0.42, COLOR_SAGE, 2, cv2.LINE_AA)
+            
+            disp_word = f"{current_word}_" if current_word else "..."
+            cv2.putText(frame, disp_word, (32, 138), cv2.FONT_HERSHEY_SIMPLEX, 0.9, COLOR_TEXT_DARK, 2, cv2.LINE_AA)
+
+        # holds / progress indicator bars
         if is_recording and not open_hand and not space_gesture_detected and hand_detected and not selecting_synonym:
             if current_mode == "SPELL" and current_holding_letter and current_holding_letter != "-" and letter_hold_start_time:
                 letter_elapsed = min(time.time() - letter_hold_start_time, HOLD_LETTER_DURATION)
                 l_ratio = letter_elapsed / HOLD_LETTER_DURATION
-                cv2.putText(frame, f"adding '{current_holding_letter}'...", (40, 75), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 255, 0), 1, cv2.LINE_AA)
-                cv2.rectangle(frame, (40, 82), (240, 95), (100, 100, 100), 2)
-                cv2.rectangle(frame, (40, 82), (40 + int(200 * l_ratio), 95), (0, 255, 0), -1)
+                cv2.putText(frame, f"Holding '{current_holding_letter}'...", (20, 180), cv2.FONT_HERSHEY_SIMPLEX, 0.45, COLOR_TEXT_DARK, 1, cv2.LINE_AA)
+                draw_progress_bar(frame, (20, 188), (220, 200), l_ratio, color=COLOR_TERRACOTTA)
 
             elif current_mode == "WORD" and asl_word_model is not None:
                 buf_len = len(word_sequence_buffer)
                 w_ratio = buf_len / 30.0
-                cv2.putText(frame, f"adding word: {buf_len}/30", (40, 75), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 0, 150), 1, cv2.LINE_AA)
-                cv2.rectangle(frame, (40, 82), (240, 95), (100, 100, 100), 2)
-                cv2.rectangle(frame, (40, 82), (40 + int(200 * w_ratio), 95), (255, 0, 150), -1)
+                cv2.putText(frame, f"Capturing gesture ({buf_len}/30)...", (20, 180), cv2.FONT_HERSHEY_SIMPLEX, 0.45, COLOR_TEXT_DARK, 1, cv2.LINE_AA)
+                draw_progress_bar(frame, (20, 188), (220, 200), w_ratio, color=COLOR_SAGE)
 
-        cv2.putText(frame, f"voice: {tts.current_voice_label}", (40, 125), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255, 150, 0), 2, cv2.LINE_AA)
 
-        if is_recording:
-            cv2.putText(frame, f"[recording mode - {current_mode}]", (40, 165), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2, cv2.LINE_AA)
-            cv2.putText(frame, f"word: {current_word}_", (40, 205), cv2.FONT_HERSHEY_SIMPLEX, 1.1, (255, 0, 255), 3, cv2.LINE_AA)
-
+        # synonym overlay modal
         if selecting_synonym:
-            box_w, box_h = 550, 180
+            box_w, box_h = 520, 160
             m_x1, m_y1 = cx - box_w // 2, cy - box_h // 2
             m_x2, m_y2 = cx + box_w // 2, cy + box_h // 2
 
-            cv2.rectangle(frame, (m_x1, m_y1), (m_x2, m_y2), (20, 20, 20), -1)
-            cv2.rectangle(frame, (m_x1, m_y1), (m_x2, m_y2), (0, 215, 255), 2)
+            draw_rounded_rect(frame, (m_x1, m_y1), (m_x2, m_y2), COLOR_OVERLAY_BG, thickness=-1, radius=16)
+            draw_rounded_rect(frame, (m_x1, m_y1), (m_x2, m_y2), COLOR_BORDER, thickness=1, radius=16)
 
-            title = "SELECT WORD MEANING"
-            t_size = cv2.getTextSize(title, cv2.FONT_HERSHEY_SIMPLEX, 0.8, 2)[0]
-            cv2.putText(frame, title, (cx - t_size[0] // 2, cy - 40), 
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 215, 255), 2, cv2.LINE_AA)
+            title = "SELECT WORD INTENT"
+            t_size = cv2.getTextSize(title, cv2.FONT_HERSHEY_SIMPLEX, 0.65, 2)[0]
+            cv2.putText(frame, title, (cx - t_size[0] // 2, cy - 30), cv2.FONT_HERSHEY_SIMPLEX, 0.65, COLOR_TEXT_DARK, 2, cv2.LINE_AA)
 
-            btn_h = 50
+            btn_h = 45
             if len(synonym_options) >= 1:
                 opt1 = synonym_options[0]
-                cv2.rectangle(frame, (cx - 210, cy - 10), (cx - 10, cy - 10 + btn_h), (0, 160, 0), -1)
-                cv2.rectangle(frame, (cx - 210, cy - 10), (cx - 10, cy - 10 + btn_h), (255, 255, 255), 1)
-                s_size = cv2.getTextSize(opt1, cv2.FONT_HERSHEY_SIMPLEX, 0.65, 2)[0]
-                cv2.putText(frame, opt1, (cx - 110 - s_size[0] // 2, cy + 22), 
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 2, cv2.LINE_AA)
+                draw_pill_button(frame, (cx - 210, cy - 10), (cx - 10, cy - 10 + btn_h), COLOR_SAGE, opt1, text_color=(255, 255, 255), font_scale=0.6)
 
             if len(synonym_options) >= 2:
                 opt2 = synonym_options[1]
-                cv2.rectangle(frame, (cx + 10, cy - 10), (cx + 210, cy - 10 + btn_h), (180, 100, 0), -1)
-                cv2.rectangle(frame, (cx + 10, cy - 10), (cx + 210, cy - 10 + btn_h), (255, 255, 255), 1)
-                s_size = cv2.getTextSize(opt2, cv2.FONT_HERSHEY_SIMPLEX, 0.65, 2)[0]
-                cv2.putText(frame, opt2, (cx + 110 - s_size[0] // 2, cy + 22), 
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 2, cv2.LINE_AA)
+                draw_pill_button(frame, (cx + 10, cy - 10), (cx + 210, cy - 10 + btn_h), COLOR_TERRACOTTA, opt2, text_color=(255, 255, 255), font_scale=0.6)
 
+        # punctuation & tone selection modal
         if selecting_punctuation:
-            box_w, box_h = 750, 200
+            box_w, box_h = 700, 190
             m_x1, m_y1 = cx - box_w // 2, cy - box_h // 2
             m_x2, m_y2 = cx + box_w // 2, cy + box_h // 2
 
-            cv2.rectangle(frame, (m_x1, m_y1), (m_x2, m_y2), (20, 20, 20), -1)
-            cv2.rectangle(frame, (m_x1, m_y1), (m_x2, m_y2), (0, 215, 255), 2)
+            draw_rounded_rect(frame, (m_x1, m_y1), (m_x2, m_y2), COLOR_OVERLAY_BG, thickness=-1, radius=16)
+            draw_rounded_rect(frame, (m_x1, m_y1), (m_x2, m_y2), COLOR_BORDER, thickness=1, radius=16)
 
             btn_y1 = cy - 10
-            btn_h = 90
+            btn_h = 80
 
             if punct_sub is None:
-                title = "SELECT PUNCTUATION"
-                t_size = cv2.getTextSize(title, cv2.FONT_HERSHEY_SIMPLEX, 0.8, 2)[0]
-                cv2.putText(frame, title, (cx - t_size[0] // 2, cy - 40), 
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 215, 255), 2, cv2.LINE_AA)
+                title = "SELECT SENTENCE PUNCTUATION"
+                t_size = cv2.getTextSize(title, cv2.FONT_HERSHEY_SIMPLEX, 0.65, 2)[0]
+                cv2.putText(frame, title, (cx - t_size[0] // 2, cy - 40), cv2.FONT_HERSHEY_SIMPLEX, 0.65, COLOR_TEXT_DARK, 2, cv2.LINE_AA)
 
-                cv2.rectangle(frame, (cx - 320, btn_y1), (cx - 120, btn_y1 + btn_h), (70, 70, 70), -1)
-                cv2.rectangle(frame, (cx - 320, btn_y1), (cx - 120, btn_y1 + btn_h), (255, 255, 255), 1)
-                cv2.putText(frame, ". (PERIOD)", (cx - 295, btn_y1 + 55), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 2, cv2.LINE_AA)
-
-                cv2.rectangle(frame, (cx - 100, btn_y1), (cx + 100, btn_y1 + btn_h), (0, 150, 255), -1)
-                cv2.rectangle(frame, (cx - 100, btn_y1), (cx + 100, btn_y1 + btn_h), (255, 255, 255), 1)
-                cv2.putText(frame, "! (EXCLAMATION)", (cx - 90, btn_y1 + 55), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 2, cv2.LINE_AA)
-
-                cv2.rectangle(frame, (cx + 120, btn_y1), (cx + 320, btn_y1 + btn_h), (180, 0, 180), -1)
-                cv2.rectangle(frame, (cx + 120, btn_y1), (cx + 320, btn_y1 + btn_h), (255, 255, 255), 1)
-                cv2.putText(frame, "? (QUESTION)", (cx + 135, btn_y1 + 55), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 2, cv2.LINE_AA)
+                draw_pill_button(frame, (cx - 320, btn_y1), (cx - 120, btn_y1 + btn_h), COLOR_SAND, ". (PERIOD)", font_scale=0.55)
+                draw_pill_button(frame, (cx - 100, btn_y1), (cx + 100, btn_y1 + btn_h), COLOR_TERRACOTTA, "! (EXCLAMATION)", text_color=(255, 255, 255), font_scale=0.5)
+                draw_pill_button(frame, (cx + 120, btn_y1), (cx + 320, btn_y1 + btn_h), COLOR_SAND, "? (QUESTION)", font_scale=0.55)
 
             elif punct_sub == "PERIOD":
-                title = "SELECT PERIOD TONE"
-                t_size = cv2.getTextSize(title, cv2.FONT_HERSHEY_SIMPLEX, 0.8, 2)[0]
-                cv2.putText(frame, title, (cx - t_size[0] // 2, cy - 40), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 215, 255), 2, cv2.LINE_AA)
+                title = "SELECT EXPRESSION TONE"
+                t_size = cv2.getTextSize(title, cv2.FONT_HERSHEY_SIMPLEX, 0.65, 2)[0]
+                cv2.putText(frame, title, (cx - t_size[0] // 2, cy - 40), cv2.FONT_HERSHEY_SIMPLEX, 0.65, COLOR_TEXT_DARK, 2, cv2.LINE_AA)
 
-                cv2.rectangle(frame, (cx - 300, btn_y1), (cx - 110, btn_y1 + btn_h), (70, 70, 70), -1)
-                cv2.rectangle(frame, (cx - 300, btn_y1), (cx - 110, btn_y1 + btn_h), (255, 255, 255), 1)
-                cv2.putText(frame, "NEUTRAL", (cx - 275, btn_y1 + 55), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 2, cv2.LINE_AA)
-
-                cv2.rectangle(frame, (cx - 95, btn_y1), (cx + 95, btn_y1 + btn_h), (180, 100, 0), -1)
-                cv2.rectangle(frame, (cx - 95, btn_y1), (cx + 95, btn_y1 + btn_h), (255, 255, 255), 1)
-                cv2.putText(frame, "SAD", (cx - 40, btn_y1 + 55), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 2, cv2.LINE_AA)
-
-                cv2.rectangle(frame, (cx + 110, btn_y1), (cx + 300, btn_y1 + btn_h), (180, 0, 180), -1)
-                cv2.rectangle(frame, (cx + 110, btn_y1), (cx + 300, btn_y1 + btn_h), (255, 255, 255), 1)
-                cv2.putText(frame, "SARCASTIC", (cx + 125, btn_y1 + 55), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 2, cv2.LINE_AA)
+                draw_pill_button(frame, (cx - 300, btn_y1), (cx - 110, btn_y1 + btn_h), COLOR_SAND, "NEUTRAL", font_scale=0.55)
+                draw_pill_button(frame, (cx - 95, btn_y1), (cx + 95, btn_y1 + btn_h), COLOR_SAND, "SAD", font_scale=0.55)
+                draw_pill_button(frame, (cx + 110, btn_y1), (cx + 300, btn_y1 + btn_h), COLOR_TERRACOTTA, "SARCASTIC", text_color=(255, 255, 255), font_scale=0.55)
 
             elif punct_sub == "EXCLAMATION":
-                title = "SELECT EXCLAMATION TONE"
-                t_size = cv2.getTextSize(title, cv2.FONT_HERSHEY_SIMPLEX, 0.8, 2)[0]
-                cv2.putText(frame, title, (cx - t_size[0] // 2, cy - 40), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 215, 255), 2, cv2.LINE_AA)
+                title = "SELECT EXPRESSION TONE"
+                t_size = cv2.getTextSize(title, cv2.FONT_HERSHEY_SIMPLEX, 0.65, 2)[0]
+                cv2.putText(frame, title, (cx - t_size[0] // 2, cy - 40), cv2.FONT_HERSHEY_SIMPLEX, 0.65, COLOR_TEXT_DARK, 2, cv2.LINE_AA)
 
-                cv2.rectangle(frame, (cx - 200, btn_y1), (cx - 10, btn_y1 + btn_h), (0, 180, 0), -1)
-                cv2.rectangle(frame, (cx - 200, btn_y1), (cx - 10, btn_y1 + btn_h), (255, 255, 255), 1)
-                cv2.putText(frame, "HAPPY", (cx - 160, btn_y1 + 55), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 2, cv2.LINE_AA)
-
-                cv2.rectangle(frame, (cx + 10, btn_y1), (cx + 200, btn_y1 + btn_h), (0, 0, 180), -1)
-                cv2.rectangle(frame, (cx + 10, btn_y1), (cx + 200, btn_y1 + btn_h), (255, 255, 255), 1)
-                cv2.putText(frame, "ANGRY", (cx + 55, btn_y1 + 55), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 2, cv2.LINE_AA)
+                draw_pill_button(frame, (cx - 200, btn_y1), (cx - 10, btn_y1 + btn_h), COLOR_SAGE, "HAPPY", text_color=(255, 255, 255), font_scale=0.6)
+                draw_pill_button(frame, (cx + 10, btn_y1), (cx + 200, btn_y1 + btn_h), COLOR_ROSE, "ANGRY", text_color=(255, 255, 255), font_scale=0.6)
 
             elif punct_sub == "QUESTION":
-                title = "SELECT QUESTION TONE"
-                t_size = cv2.getTextSize(title, cv2.FONT_HERSHEY_SIMPLEX, 0.8, 2)[0]
-                cv2.putText(frame, title, (cx - t_size[0] // 2, cy - 40), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 215, 255), 2, cv2.LINE_AA)
+                title = "SELECT EXPRESSION TONE"
+                t_size = cv2.getTextSize(title, cv2.FONT_HERSHEY_SIMPLEX, 0.65, 2)[0]
+                cv2.putText(frame, title, (cx - t_size[0] // 2, cy - 40), cv2.FONT_HERSHEY_SIMPLEX, 0.65, COLOR_TEXT_DARK, 2, cv2.LINE_AA)
 
-                cv2.rectangle(frame, (cx - 200, btn_y1), (cx - 10, btn_y1 + btn_h), (180, 0, 180), -1)
-                cv2.rectangle(frame, (cx - 200, btn_y1), (cx - 10, btn_y1 + btn_h), (255, 255, 255), 1)
-                cv2.putText(frame, "QUESTION", (cx - 170, btn_y1 + 55), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 2, cv2.LINE_AA)
+                draw_pill_button(frame, (cx - 200, btn_y1), (cx - 10, btn_y1 + btn_h), COLOR_TERRACOTTA, "QUESTION", text_color=(255, 255, 255), font_scale=0.55)
+                draw_pill_button(frame, (cx + 10, btn_y1), (cx + 200, btn_y1 + btn_h), COLOR_SAND, "SARCASTIC", font_scale=0.55)
 
-                cv2.rectangle(frame, (cx + 10, btn_y1), (cx + 200, btn_y1 + btn_h), (0, 150, 255), -1)
-                cv2.rectangle(frame, (cx + 10, btn_y1), (cx + 200, btn_y1 + btn_h), (255, 255, 255), 1)
-                cv2.putText(frame, "SARCASTIC", (cx + 25, btn_y1 + 55), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 2, cv2.LINE_AA)
-
+        # tense selection modal
         if selecting_tense:
-            box_w, box_h = 600, 260
+            box_w, box_h = 550, 240
             m_x1, m_y1 = cx - box_w // 2, cy - box_h // 2
             m_x2, m_y2 = cx + box_w // 2, cy + box_h // 2
 
-            cv2.rectangle(frame, (m_x1, m_y1), (m_x2, m_y2), (20, 20, 20), -1)
-            cv2.rectangle(frame, (m_x1, m_y1), (m_x2, m_y2), (0, 215, 255), 2)
+            draw_rounded_rect(frame, (m_x1, m_y1), (m_x2, m_y2), COLOR_OVERLAY_BG, thickness=-1, radius=16)
+            draw_rounded_rect(frame, (m_x1, m_y1), (m_x2, m_y2), COLOR_BORDER, thickness=1, radius=16)
 
-            title = "SELECT SENTENCE TENSE"
-            t_size = cv2.getTextSize(title, cv2.FONT_HERSHEY_SIMPLEX, 0.8, 2)[0]
-            cv2.putText(frame, title, (cx - t_size[0] // 2, cy - 75), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 215, 255), 2, cv2.LINE_AA)
+            title = "SELECT TARGET GRAMMAR TENSE"
+            t_size = cv2.getTextSize(title, cv2.FONT_HERSHEY_SIMPLEX, 0.65, 2)[0]
+            cv2.putText(frame, title, (cx - t_size[0] // 2, cy - 70), cv2.FONT_HERSHEY_SIMPLEX, 0.65, COLOR_TEXT_DARK, 2, cv2.LINE_AA)
 
             sub_txt = f"'{temp_sentence}'"
-            s_size = cv2.getTextSize(sub_txt, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 1)[0]
-            cv2.putText(frame, sub_txt, (cx - s_size[0] // 2, cy - 40), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (200, 200, 200), 1, cv2.LINE_AA)
+            s_size = cv2.getTextSize(sub_txt, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 1)[0]
+            cv2.putText(frame, sub_txt, (cx - s_size[0] // 2, cy - 40), cv2.FONT_HERSHEY_SIMPLEX, 0.55, COLOR_TEXT_MUTED, 1, cv2.LINE_AA)
 
             btn_h = 45
 
-            cv2.rectangle(frame, (cx - 210, cy - 10), (cx - 10, cy - 10 + btn_h), (0, 160, 0), -1)
-            cv2.rectangle(frame, (cx - 210, cy - 10), (cx - 10, cy - 10 + btn_h), (255, 255, 255), 1)
-            cv2.putText(frame, "NOW (-ing)", (cx - 170, cy + 18), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 2, cv2.LINE_AA)
-
-            cv2.rectangle(frame, (cx + 10, cy - 10), (cx + 210, cy - 10 + btn_h), (180, 100, 0), -1)
-            cv2.rectangle(frame, (cx + 10, cy - 10), (cx + 210, cy - 10 + btn_h), (255, 255, 255), 1)
-            cv2.putText(frame, "PAST", (cx + 80, cy + 18), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 2, cv2.LINE_AA)
-
-            cv2.rectangle(frame, (cx - 210, cy + 50), (cx - 10, cy + 50 + btn_h), (150, 0, 180), -1)
-            cv2.rectangle(frame, (cx - 210, cy + 50), (cx - 10, cy + 50 + btn_h), (255, 255, 255), 1)
-            cv2.putText(frame, "FUTURE", (cx - 150, cy + 78), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 2, cv2.LINE_AA)
-
-            cv2.rectangle(frame, (cx + 10, cy + 50), (cx + 210, cy + 50 + btn_h), (70, 70, 70), -1)
-            cv2.rectangle(frame, (cx + 10, cy + 50), (cx + 210, cy + 50 + btn_h), (255, 255, 255), 1)
-            cv2.putText(frame, "ORIGINAL", (cx + 55, cy + 78), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 2, cv2.LINE_AA)
+            draw_pill_button(frame, (cx - 210, cy - 10), (cx - 10, cy - 10 + btn_h), COLOR_TERRACOTTA, "NOW (-ing)", text_color=(255, 255, 255), font_scale=0.55)
+            draw_pill_button(frame, (cx + 10, cy - 10), (cx + 210, cy - 10 + btn_h), COLOR_SAND, "PAST", font_scale=0.55)
+            draw_pill_button(frame, (cx - 210, cy + 50), (cx - 10, cy + 50 + btn_h), COLOR_SAND, "FUTURE", font_scale=0.55)
+            draw_pill_button(frame, (cx + 10, cy + 50), (cx + 210, cy + 50 + btn_h), COLOR_SAND, "ORIGINAL", font_scale=0.55)
 
         if is_converting_tense:
-            cv2.putText(frame, "CONVERTING TENSE WITH AI...", (cx - 180, cy), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2, cv2.LINE_AA)
+            draw_rounded_rect(frame, (cx - 180, cy - 25), (cx + 180, cy + 25), COLOR_BG_CARD, thickness=-1, radius=10)
+            draw_rounded_rect(frame, (cx - 180, cy - 25), (cx + 180, cy + 25), COLOR_BORDER, thickness=1, radius=10)
+            cv2.putText(frame, "Refining translation with Gemini...", (cx - 150, cy + 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, COLOR_TEXT_DARK, 1, cv2.LINE_AA)
 
+        # gestural hold indicators (palm toggle / space)
         if open_hand_start_time and current_mode == "SPELL":
             hold_elapsed = min(time.time() - open_hand_start_time, TOGGLE_GESTURE_DURATION)
             progress_ratio = hold_elapsed / TOGGLE_GESTURE_DURATION
-            action_text = "finishing..." if is_recording else "starting..."
-            cv2.putText(frame, f"hold open hand: {action_text}", (40, h - 50), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 255, 255), 2, cv2.LINE_AA)
-            cv2.rectangle(frame, (40, h - 35), (240, h - 20), (100, 100, 100), 2)
-            cv2.rectangle(frame, (40, h - 35), (40 + int(200 * progress_ratio), h - 20), (0, 255, 255), -1)
+            action_text = "Stopping..." if is_recording else "Starting..."
+            cv2.putText(frame, f"Hold open palm: {action_text}", (20, h - 45), cv2.FONT_HERSHEY_SIMPLEX, 0.45, COLOR_TEXT_DARK, 1, cv2.LINE_AA)
+            draw_progress_bar(frame, (20, h - 35), (220, h - 23), progress_ratio, color=COLOR_TERRACOTTA)
 
         if space_start_time:
             space_elapsed = min(time.time() - space_start_time, ACTION_GESTURE_DURATION)
             s_ratio = space_elapsed / ACTION_GESTURE_DURATION
-            cv2.putText(frame, "adding space...", (280, h - 50), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 0), 2, cv2.LINE_AA)
-            cv2.rectangle(frame, (280, h - 35), (480, h - 20), (100, 100, 100), 2)
-            cv2.rectangle(frame, (280, h - 35), (280 + int(200 * s_ratio), h - 20), (255, 255, 0), -1)
+            cv2.putText(frame, "Adding space...", (250, h - 45), cv2.FONT_HERSHEY_SIMPLEX, 0.45, COLOR_TEXT_DARK, 1, cv2.LINE_AA)
+            draw_progress_bar(frame, (250, h - 35), (450, h - 23), s_ratio, color=COLOR_SAGE)
 
+        # final render display
         cv2.imshow(window_name, frame)
 
+        # keyboard shortcuts
         key = cv2.waitKey(1) & 0xFF
         if key == ord('q'):
             bg_ai.running = False
