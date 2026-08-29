@@ -1,7 +1,5 @@
 An algorithm that detects sign language, turns it into text (and also reads out individual signs) and then turns it into speech by combining all signs into a logical sentence. (ASL Grammar is different from normal spoken grammar so the last step is necessary)
 
-THIS IS MY PERSONAL PROJECT FOR SCHOOL, FEEL FREE TO READ MY DEVLOGS!
-
 UPDATES DAILY. (hopefully)
 
 Daily log:
