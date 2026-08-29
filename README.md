@@ -53,3 +53,5 @@ Day 22: I have a flight in two hours and I've not left my house (so sad). I adde
 Day 23: No time to update -- I basically made the tense transformer better by adding present continous tense etc, sharpening up the gemini prompt and a few more things. I also fixed the accuracy for words (or atleast I tried). Tomorrow: I'll add 5-6 words to the dataset, and make the ui cuter?? Idk I feel like from here on out I'll just chill and amass a big dataset.
 
 Day 24: Bro I found out that none of my commits have been verified smh I just got a ssh key. Anyway, today I redesigned the ui to be more warm/ minimalistic. Tomorrow I'll add more words -- from here, I'm going to have shorter updates and just add more words.
+
+Day 25: didn't even add anything - off day.
