@@ -8,11 +8,31 @@ import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import accuracy_score, classification_report, confusion_matrix, ConfusionMatrixDisplay
+from train_model import extract_hand_features
 
 FRAMES_PER_SAMPLE = 30
 
+# face landmarks matching collect_words.py
+KEY_FACE_INDICES = [
+    1,                  # nose tip anchor
+    33, 133, 159, 145,  # left eye
+    362, 263, 386, 374, # right eye
+    70, 63, 105, 66,    # left eyebrow
+    300, 293, 334, 296, # right eyebrow
+    61, 291, 0, 17, 13, 14, # outer & inner mouth
+    78, 308, 82, 312    # lip curves
+]
+
+def get_expected_feature_counts():
+    dummy_pts = np.zeros((21, 3))
+    num_hand_features = len(extract_hand_features(dummy_pts))
+    num_face_features = len(KEY_FACE_INDICES) * 3
+    num_features_per_frame = num_hand_features + num_face_features
+    expected_total_vals = FRAMES_PER_SAMPLE * num_features_per_frame
+    return num_features_per_frame, expected_total_vals
+
 def aggregate_sequence(sequence_matrix):
-    # flatten 30 frames into a aggregate vector so exact timing doesn't mess up predictions
+    # flatten 30 frames into an aggregate vector so exact timing doesn't mess up predictions
     seq = np.array(sequence_matrix, dtype=np.float32)
     mean_f = np.mean(seq, axis=0)       # average hand position
     std_f = np.std(seq, axis=0)         # movement variance
@@ -53,6 +73,9 @@ def load_dataset(csv_path="asl_words.csv"):
 
     labels = []
     features = []
+    
+    num_features_per_frame, expected_total_vals = get_expected_feature_counts()
+    skipped_rows = 0
 
     with open(csv_path, mode="r", encoding="utf-8") as f:
         reader = csv.reader(f)
@@ -66,12 +89,12 @@ def load_dataset(csv_path="asl_words.csv"):
             except ValueError:
                 continue
 
-            # make sure row length splits evenly across 30 frames
-            total_vals = len(feat_values)
-            num_features_per_frame = total_vals // FRAMES_PER_SAMPLE
-            truncated_len = num_features_per_frame * FRAMES_PER_SAMPLE
+            # check row matches exact expected length from collect_words.py
+            if len(feat_values) != expected_total_vals:
+                skipped_rows += 1
+                continue
             
-            raw_seq = np.array(feat_values[:truncated_len]).reshape(FRAMES_PER_SAMPLE, num_features_per_frame)
+            raw_seq = np.array(feat_values).reshape(FRAMES_PER_SAMPLE, num_features_per_frame)
 
             # augment and aggregate sequences
             aug_features = augment_sequence(raw_seq)
@@ -79,8 +102,11 @@ def load_dataset(csv_path="asl_words.csv"):
                 labels.append(label)
                 features.append(feat_vec)
 
+    if skipped_rows > 0:
+        print(f"[warning] skipped {skipped_rows} legacy/incompatible rows not matching target feature size ({expected_total_vals}).")
+
     if not labels:
-        print("error: no valid data rows found in csv.")
+        print("error: no valid data rows found in csv matching current feature dimensions.")
         return None, None
 
     print(f"[info] generated {len(features)} total augmented samples from CSV.")
