@@ -53,3 +53,5 @@ Day 23: No time to update -- I basically made the tense transformer better by ad
 Day 24: Bro I found out that none of my commits have been verified smh I just got a ssh key. Anyway, today I redesigned the ui to be more warm/ minimalistic. Tomorrow I'll add more words -- from here, I'm going to have shorter updates and just add more words.
 
 Day 25: didn't even add anything - off day.
+
+Day 26: Added 6 words to the dataset. Tomorrow I will add 5-6 more, and maybe add like emotions logic as I learned that the amount of facial expression while you're signing it shows how intense you're experiencing that emotion.
