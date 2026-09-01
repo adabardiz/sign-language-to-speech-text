@@ -42,7 +42,7 @@ def is_valid_hand_shape(landmarks):
     wrist = np.array([landmarks[0].x, landmarks[0].y])
     middle_mcp = np.array([landmarks[9].x, landmarks[9].y])
     palm_size = np.linalg.norm(wrist - middle_mcp)
-    return 0.03 < palm_size < 0.40
+    return 0.02 < palm_size < 0.45
 
 def append_sample_to_csv(filepath, row_data):
     try:
@@ -73,13 +73,14 @@ def delete_last_csv_row(filepath):
 
 def main():
     base_options = python.BaseOptions(model_asset_path="hand_landmarker.task")
+    # tuned confidence levels for smoother tracking during active gestures
     options = vision.HandLandmarkerOptions(
         base_options=base_options, 
         running_mode=vision.RunningMode.VIDEO, 
         num_hands=2,
-        min_hand_detection_confidence=0.55,
-        min_hand_presence_confidence=0.55,
-        min_tracking_confidence=0.55
+        min_hand_detection_confidence=0.50,
+        min_hand_presence_confidence=0.50,
+        min_tracking_confidence=0.50
     )
     detector = vision.HandLandmarker.create_from_options(options)
 
@@ -87,8 +88,8 @@ def main():
     face_mesh = mp_face_mesh.FaceMesh(
         max_num_faces=1,
         refine_landmarks=False,
-        min_detection_confidence=0.55,
-        min_tracking_confidence=0.55
+        min_detection_confidence=0.50,
+        min_tracking_confidence=0.50
     )
 
     dummy_pts = np.zeros((21, 3))
@@ -201,7 +202,7 @@ def main():
 
                     for hand_landmarks in valid_hands:
                         for connection in HAND_CONNECTIONS:
-                            start_p = (int(hand_landmarks[connection[0]].x * w), int(hand_landmarks[connection[1]].y * h))
+                            start_p = (int(hand_landmarks[connection[0]].x * w), int(hand_landmarks[connection[0]].y * h))
                             end_p = (int(hand_landmarks[connection[1]].x * w), int(hand_landmarks[connection[1]].y * h))
                             cv2.line(frame, start_p, end_p, (255, 255, 255), 2)
                         for lm in hand_landmarks:
