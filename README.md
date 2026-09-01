@@ -55,3 +55,5 @@ Day 24: Bro I found out that none of my commits have been verified smh I just go
 Day 25: didn't even add anything - off day.
 
 Day 26: Added 6 words to the dataset. Tomorrow I will add 5-6 more, and maybe add like emotions logic as I learned that the amount of facial expression while you're signing it shows how intense you're experiencing that emotion.
+
+Day 27: Alrighty today I added 7 words, made hand tracking a bit more accurate & finally incorporated the emotion logic. Tomorrow I'll add more words.
