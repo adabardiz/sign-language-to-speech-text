@@ -9,7 +9,6 @@ from collections import deque
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
 
-# try pulling feature extraction pipeline from local module
 try:
     from train_model import extract_hand_features
 except ImportError:
@@ -27,7 +26,6 @@ COLOR_TERRACOTTA = (70, 110, 210)
 COLOR_SAND = (180, 210, 230)
 COLOR_OVERLAY_BG = (250, 250, 250)
 
-# hand joint connection mapping
 HAND_CONNECTIONS = [
     (0, 1), (1, 2), (2, 3), (3, 4),         # thumb
     (5, 6), (6, 7), (7, 8),                 # index finger
@@ -37,13 +35,14 @@ HAND_CONNECTIONS = [
     (0, 5), (5, 9), (9, 13), (13, 17), (0, 17) # palm base
 ]
 
+# selected facial landmark indices for expression intensity tracking
 KEY_FACE_INDICES = [
     1,                  # nose tip anchor point
     33, 133, 159, 145,  # left eye bounds
     362, 263, 386, 374, # right eye bounds
     70, 63, 105, 66,    # left eyebrow
     300, 293, 334, 296, # right eyebrow
-    61, 291, 0, 17, 13, 14, 
+    61, 291, 0, 17, 13, 14,
     78, 308, 82, 312    # lip curvature
 ]
 
@@ -56,6 +55,56 @@ def extract_face_features(face_landmarks):
         lm = face_landmarks[idx]
         face_feats.extend([lm.x - nose_tip[0], lm.y - nose_tip[1], lm.z - nose_tip[2]])
     return face_feats
+
+def calculate_facial_intensity(face_landmarks):
+    if not face_landmarks:
+        return 1.0, "NEUTRAL"
+    
+    def get_pt(idx):
+        lm = face_landmarks[idx]
+        return np.array([lm.x, lm.y])
+
+    # normalize distance using outer eye span as base face scale
+    left_eye_outer = get_pt(33)
+    right_eye_outer = get_pt(263)
+    face_scale = np.linalg.norm(left_eye_outer - right_eye_outer)
+    if face_scale == 0:
+        return 1.0, "NEUTRAL"
+
+    # distance measurements normalized by face scale
+    upper_lip = get_pt(13)
+    lower_lip = get_pt(14)
+    mouth_height = np.linalg.norm(upper_lip - lower_lip) / face_scale
+
+    left_eyebrow = get_pt(105)
+    left_eye = get_pt(159)
+    eyebrow_dist = np.linalg.norm(left_eyebrow - left_eye) / face_scale
+
+    left_eye_top = get_pt(159)
+    left_eye_bottom = get_pt(145)
+    eye_openness = np.linalg.norm(left_eye_top - left_eye_bottom) / face_scale
+
+    neutral_mouth = 0.08
+    neutral_eyebrow = 0.22
+    neutral_eye = 0.12
+
+    # calculate relative displacement deltas
+    mouth_delta = max(0.0, mouth_height - neutral_mouth)
+    eyebrow_delta = abs(eyebrow_dist - neutral_eyebrow)
+    eye_delta = max(0.0, eye_openness - neutral_eye)
+
+    #weight deltas to scores
+    raw_score = (mouth_delta * 2.5) + (eyebrow_delta * 3.0) + (eye_delta * 2.0)
+    intensity_multiplier = 1.0 + min(max(raw_score, 0.0), 1.5)
+
+    if intensity_multiplier < 1.25:
+        level = "NEUTRAL"
+    elif intensity_multiplier < 1.60:
+        level = "MODERATE"
+    else:
+        level = "EXTREME"
+
+    return round(intensity_multiplier, 2), level
 
 def is_valid_hand_shape(landmarks):
     wrist = np.array([landmarks[0].x, landmarks[0].y])
@@ -88,6 +137,7 @@ def aggregate_sequence(sequence_matrix):
     return np.hstack([mean_f, std_f, delta_f, max_f, min_f])
 
 def transform_tense(sentence, tense_target):
+    # simple text formatting hook for tenses
     clean_sent = sentence.strip()
     if not clean_sent:
         return ""
@@ -99,7 +149,6 @@ def transform_tense(sentence, tense_target):
         return f"Will {clean_sent.lower()}"
     return clean_sent
 
-# custom drawing routines for clean visual elements
 def draw_rounded_rect(img, pt1, pt2, color, thickness=-1, radius=10):
     x1, y1 = pt1
     x2, y2 = pt2
@@ -140,14 +189,17 @@ def draw_progress_bar(img, pt1, pt2, ratio, color=COLOR_TERRACOTTA):
     if fill_x2 > pt1[0] + 4:
         draw_rounded_rect(img, pt1, (fill_x2, pt2[1]), color, thickness=-1, radius=4)
 
+# tts & background inference workers
 class TextToSpeechEngine:
     def __init__(self):
         self.voices = ["Default Neutral", "Expressive"]
         self.voice_idx = 0
         self.current_voice_label = self.voices[self.voice_idx]
 
-    def speak(self, text, tone="neutral"):
-        print(f"[TTS ({tone})]: {text}")
+    def speak(self, text, tone="neutral", intensity=1.0):
+        # logging tts speech output along with intensity context
+        intensity_tag = f" [{intensity}x]" if intensity > 1.2 else ""
+        print(f"[TTS ({tone}){intensity_tag}]: {text}")
 
     def toggle_voice(self):
         self.voice_idx = (self.voice_idx + 1) % len(self.voices)
@@ -182,6 +234,7 @@ def on_mouse_click(event, x, y, flags, param):
 def main():
     global mouse_click_pos
 
+    # load trained model files
     asl_word_model = None
     if os.path.exists("asl_word_model.pkl"):
         asl_word_model = joblib.load("asl_word_model.pkl")
@@ -196,7 +249,7 @@ def main():
     bg_ai = BackgroundAIThread(letter_model=letter_model)
     tts = TextToSpeechEngine()
 
-    # set up mediapipe task options
+    # setup mediapipe tasks
     base_options = python.BaseOptions(model_asset_path="hand_landmarker.task")
     options = vision.HandLandmarkerOptions(
         base_options=base_options, 
@@ -224,7 +277,7 @@ def main():
     cv2.namedWindow(window_name)
     cv2.setMouseCallback(window_name, on_mouse_click)
 
-    # state trackers and gesture buffers
+    # application states
     current_mode = "SPELL"
     word_sequence_buffer = deque(maxlen=30)
     last_word_pred_time = 0.0
@@ -274,7 +327,7 @@ def main():
         with bg_ai.result_lock:
             predicted_letter = bg_ai.predicted_letter
 
-        # handle mouse interactions
+        # handle mouse interactions across interface overlays
         if mouse_click_pos is not None:
             mx, my = mouse_click_pos
             mouse_click_pos = None
@@ -415,11 +468,13 @@ def main():
             frame_timestamp_ms = last_timestamp_ms + 1
         last_timestamp_ms = frame_timestamp_ms
 
-        # run mediapipe inference on frame
         detection_result = detector.detect_for_video(mp_image, frame_timestamp_ms)
         face_results = face_mesh.process(rgb_frame)
         face_lms = face_results.multi_face_landmarks[0].landmark if face_results.multi_face_landmarks else None
         face_feats = extract_face_features(face_lms)
+        
+        # calculate facial intensity multiplier from facial landmarks
+        intensity_mult, intensity_label = calculate_facial_intensity(face_lms)
 
         hand_detected = False
         space_gesture_detected = False
@@ -441,7 +496,6 @@ def main():
                 if not space_gesture_detected:
                     open_hand = is_open_hand(primary_hand)
 
-                # space gesture timer logic
                 if is_recording and space_gesture_detected:
                     if space_start_time is None: space_start_time = time.time()
                     elif (time.time() - space_start_time >= ACTION_GESTURE_DURATION) and not space_triggered:
@@ -450,7 +504,6 @@ def main():
                 else:
                     space_start_time, space_triggered = None, False
 
-                # toggle recording via palm gesture
                 if current_mode == "SPELL" and open_hand and not space_gesture_detected and hand_movement < 0.035:
                     if open_hand_start_time is None: open_hand_start_time = time.time()
                     elif (time.time() - open_hand_start_time >= TOGGLE_GESTURE_DURATION) and not open_hand_triggered:
@@ -473,7 +526,6 @@ def main():
                 features = extract_hand_features(pts)
                 bg_ai.update_data(features, primary_hand[0].x)
 
-                # render skeletal overlays
                 for hand_landmarks in valid_hands:
                     for connection in HAND_CONNECTIONS:
                         start_p = (int(hand_landmarks[connection[0]].x * w), int(hand_landmarks[connection[1]].y * h))
@@ -488,13 +540,12 @@ def main():
             bg_ai.update_data(None, None)
             open_hand_start_time, space_start_time, letter_hold_start_time, current_holding_letter, prev_wrist_pos = None, None, None, None, None
 
-        # process sign detection logic while recording
         if is_recording and not open_hand and not space_gesture_detected and hand_detected and not selecting_synonym:
             if current_mode == "SPELL":
                 if predicted_letter == current_holding_letter:
                     if time.time() - letter_hold_start_time >= HOLD_LETTER_DURATION:
                         current_word += predicted_letter
-                        tts.speak(predicted_letter, tone="neutral")
+                        tts.speak(predicted_letter, tone="neutral", intensity=intensity_mult)
                         letter_hold_start_time = time.time()  
                 else:
                     current_holding_letter = predicted_letter
@@ -510,12 +561,17 @@ def main():
                         try:
                             predicted_word = asl_word_model.predict([aggregated_vec])[0]
                             if predicted_word:
-                                if "/" in predicted_word:
-                                    synonym_options = [w.strip() for w in predicted_word.split("/") if w.strip()]
+                                # adjust intensity prefix if facial intensity is high
+                                word_str = predicted_word.strip()
+                                if intensity_label == "EXTREME":
+                                    word_str = f"VERY {word_str}"
+
+                                if "/" in word_str:
+                                    synonym_options = [w.strip() for w in word_str.split("/") if w.strip()]
                                     selecting_synonym = True
                                 else:
-                                    current_word += f"{predicted_word} "
-                                    tts.speak(predicted_word, tone=selected_tone)
+                                    current_word += f"{word_str} "
+                                    tts.speak(word_str, tone=selected_tone, intensity=intensity_mult)
                         except Exception as e:
                             print("word prediction error:", e)
 
@@ -526,7 +582,7 @@ def main():
         else:
             letter_hold_start_time, current_holding_letter = None, None
 
-        # draw top navigation buttons
+        # render action buttons
         rec_bg = COLOR_SAGE if not is_recording else COLOR_ROSE
         rec_txt_color = (255, 255, 255)
         rec_btn_text = "STOP" if is_recording else "START"
@@ -539,7 +595,7 @@ def main():
         draw_pill_button(frame, (w - 270, 20), (w - 150, 55), COLOR_SAND, "DELETE", text_color=COLOR_TEXT_DARK, font_scale=0.55)
         draw_pill_button(frame, (w - 140, 20), (w - 20, 55), COLOR_ROSE, "CLEAR", text_color=(255, 255, 255), font_scale=0.55)
 
-        # draw instructions card on top right
+        # instructions panel
         box_x1, box_y1 = w - 300, 75
         box_x2, box_y2 = w - 20, 310
         draw_rounded_rect(frame, (box_x1, box_y1), (box_x2, box_y2), COLOR_BG_CARD, thickness=-1, radius=12)
@@ -566,7 +622,7 @@ def main():
             else:
                 cv2.putText(frame, line_text, (box_x1 + 14, y_pos), cv2.FONT_HERSHEY_SIMPLEX, 0.40, COLOR_TEXT_MUTED, 1, cv2.LINE_AA)
 
-        # status cards (left side)
+        # status cards
         draw_rounded_rect(frame, (20, 20), (220, 65), COLOR_BG_CARD, thickness=-1, radius=10)
         draw_rounded_rect(frame, (20, 20), (220, 65), COLOR_BORDER, thickness=1, radius=10)
         cv2.putText(frame, "CURRENT SIGN", (32, 36), cv2.FONT_HERSHEY_SIMPLEX, 0.38, COLOR_TEXT_MUTED, 1, cv2.LINE_AA)
@@ -577,6 +633,12 @@ def main():
         cv2.putText(frame, "VOICE ENGINE", (242, 36), cv2.FONT_HERSHEY_SIMPLEX, 0.38, COLOR_TEXT_MUTED, 1, cv2.LINE_AA)
         cv2.putText(frame, f"{tts.current_voice_label}", (242, 58), cv2.FONT_HERSHEY_SIMPLEX, 0.65, COLOR_TERRACOTTA, 2, cv2.LINE_AA)
 
+        # facial expression intensity card
+        draw_rounded_rect(frame, (440, 20), (640, 65), COLOR_BG_CARD, thickness=-1, radius=10)
+        draw_rounded_rect(frame, (440, 20), (640, 65), COLOR_BORDER, thickness=1, radius=10)
+        cv2.putText(frame, "EMOTION INTENSITY", (452, 36), cv2.FONT_HERSHEY_SIMPLEX, 0.38, COLOR_TEXT_MUTED, 1, cv2.LINE_AA)
+        cv2.putText(frame, f"{intensity_label} ({intensity_mult}x)", (452, 58), cv2.FONT_HERSHEY_SIMPLEX, 0.55, COLOR_SAGE if intensity_label == "NEUTRAL" else COLOR_TERRACOTTA, 2, cv2.LINE_AA)
+
         if is_recording:
             draw_rounded_rect(frame, (20, 80), (430, 160), COLOR_BG_CARD, thickness=-1, radius=12)
             draw_rounded_rect(frame, (20, 80), (430, 160), COLOR_BORDER, thickness=1, radius=12)
@@ -584,7 +646,6 @@ def main():
             disp_word = f"{current_word}_" if current_word else "..."
             cv2.putText(frame, disp_word, (32, 138), cv2.FONT_HERSHEY_SIMPLEX, 0.9, COLOR_TEXT_DARK, 2, cv2.LINE_AA)
 
-        # progress bars for holding signs/capturing gestures
         if is_recording and not open_hand and not space_gesture_detected and hand_detected and not selecting_synonym:
             if current_mode == "SPELL" and current_holding_letter and current_holding_letter != "-" and letter_hold_start_time:
                 letter_elapsed = min(time.time() - letter_hold_start_time, HOLD_LETTER_DURATION)
@@ -598,6 +659,7 @@ def main():
                 cv2.putText(frame, f"Capturing gesture ({buf_len}/30)...", (20, 180), cv2.FONT_HERSHEY_SIMPLEX, 0.45, COLOR_TEXT_DARK, 1, cv2.LINE_AA)
                 draw_progress_bar(frame, (20, 188), (220, 200), w_ratio, color=COLOR_SAGE)
 
+        # word intent / synonym selection modal
         if selecting_synonym:
             box_w, box_h = 520, 160
             m_x1, m_y1 = cx - box_w // 2, cy - box_h // 2
@@ -618,6 +680,7 @@ def main():
                 opt2 = synonym_options[1]
                 draw_pill_button(frame, (cx + 10, cy - 10), (cx + 210, cy - 10 + btn_h), COLOR_TERRACOTTA, opt2, text_color=(255, 255, 255), font_scale=0.6)
 
+        # punctuation selection modal
         if selecting_punctuation:
             box_w, box_h = 700, 190
             m_x1, m_y1 = cx - box_w // 2, cy - box_h // 2
@@ -662,6 +725,7 @@ def main():
                 draw_pill_button(frame, (cx - 200, btn_y1), (cx - 10, btn_y1 + btn_h), COLOR_TERRACOTTA, "QUESTION", text_color=(255, 255, 255), font_scale=0.55)
                 draw_pill_button(frame, (cx + 10, btn_y1), (cx + 200, btn_y1 + btn_h), COLOR_SAND, "SARCASTIC", font_scale=0.55)
 
+        # grammar tense selection modal
         if selecting_tense:
             box_w, box_h = 550, 240
             m_x1, m_y1 = cx - box_w // 2, cy - box_h // 2
@@ -690,7 +754,7 @@ def main():
             draw_rounded_rect(frame, (cx - 180, cy - 25), (cx + 180, cy + 25), COLOR_BORDER, thickness=1, radius=10)
             cv2.putText(frame, "Refining translation with Gemini...", (cx - 150, cy + 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, COLOR_TEXT_DARK, 1, cv2.LINE_AA)
 
-        # gesture hold progress indicators at the bottom
+        # gesture progress bars at frame bottom
         if open_hand_start_time and current_mode == "SPELL":
             hold_elapsed = min(time.time() - open_hand_start_time, TOGGLE_GESTURE_DURATION)
             progress_ratio = hold_elapsed / TOGGLE_GESTURE_DURATION
@@ -706,7 +770,6 @@ def main():
 
         cv2.imshow(window_name, frame)
 
-        # keyboard shortcuts
         key = cv2.waitKey(1) & 0xFF
         if key == ord('q'):
             bg_ai.running = False
