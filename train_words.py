@@ -12,14 +12,13 @@ from train_model import extract_hand_features
 
 FRAMES_PER_SAMPLE = 30
 
-# face landmarks matching collect_words.py
 KEY_FACE_INDICES = [
     1,                  # nose tip anchor
     33, 133, 159, 145,  # left eye
     362, 263, 386, 374, # right eye
     70, 63, 105, 66,    # left eyebrow
     300, 293, 334, 296, # right eyebrow
-    61, 291, 0, 17, 13, 14, # outer & inner mouth
+    61, 291, 0, 17, 13, 14,
     78, 308, 82, 312    # lip curves
 ]
 
@@ -32,13 +31,12 @@ def get_expected_feature_counts():
     return num_features_per_frame, expected_total_vals
 
 def aggregate_sequence(sequence_matrix):
-    # flatten 30 frames into an aggregate vector so exact timing doesn't mess up predictions
     seq = np.array(sequence_matrix, dtype=np.float32)
-    mean_f = np.mean(seq, axis=0)       # average hand position
-    std_f = np.std(seq, axis=0)         # movement variance
-    delta_f = seq[-1] - seq[0]          # total displacement from start to end
-    max_f = np.max(seq, axis=0)         # peak hand coordinates
-    min_f = np.min(seq, axis=0)         # min hand coordinates
+    mean_f = np.mean(seq, axis=0)       
+    std_f = np.std(seq, axis=0)         
+    delta_f = seq[-1] - seq[0]  # total displacement from start to end
+    max_f = np.max(seq, axis=0)         
+    min_f = np.min(seq, axis=0)         
     
     return np.hstack([mean_f, std_f, delta_f, max_f, min_f])
 
@@ -89,7 +87,6 @@ def load_dataset(csv_path="asl_words.csv"):
             except ValueError:
                 continue
 
-            # check row matches exact expected length from collect_words.py
             if len(feat_values) != expected_total_vals:
                 skipped_rows += 1
                 continue
