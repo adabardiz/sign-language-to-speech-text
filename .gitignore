@@ -14,4 +14,10 @@ yolov9c.pt
 *.mp4
 
 tts_cache/
-*.mp3
+*.mp3asl_words.csv
+asl_landmarks.csv
+*.csv
+*.csv
+*.pkl
+*.pt
+*.task
