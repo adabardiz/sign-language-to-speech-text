@@ -14,7 +14,7 @@ Day 4: longer update today! normalized ASL hand landmarks relative to the wrist 
 
 Day 5: struggled with the mediapipe import bug A LOT today. fixed it by downgrading, figured out it was due to a bug w/ apple silicon. got the accuracy up from 80% to 95% which im super happy abt! re-incorporated the emotions tracker. tomorrow: make the facial tracker better for sad & happy emotions, try to incorporate both hands into the tracking, incroporate hold to commit which is like wait 2-3 seconds to append a letter to current-word & add a mechanism to delete. and if i'm successful with the current word thing, adding a display of what current_word is. 
 
-Day 6: yay real progress is happening! refined emotion detector especially with the 'sad' emotion and made the 'happy' detector better by prioritizing it in the detection process. i added a open hand stop/start gesture control (progress bar, too) with a 2 second hold to commit mechanic that appends detected ASL letters into words (so basically finger spelling) tomorrow: i will try to add a space & deleting mechanism, try to make the displayed word be read out loud, try to add both hands into tracking to prepare for the addition of words.
+Day 6: yay! refined emotion detector especially with the 'sad' emotion and made the 'happy' detector better by prioritizing it in the detection process. i added a open hand stop/start gesture control (progress bar, too) with a 2 second hold to commit mechanic that appends detected ASL letters into words (so basically finger spelling) tomorrow: i will try to add a space & deleting mechanism, try to make the displayed word be read out loud, try to add both hands into tracking to prepare for the addition of words.
 
 Day 7:today i added double hand tracking & a text to speech engine so the algorithm can sound out letters appended to current_word & sound out words formed by finger spelling after the finish gesture. before that, I added a clear all buttonn & gesture, and deleting & space mechanisms. tomorrow i will: remove the clear gesture (it makes things harder than they need to be), try to stop the algorithm from sounding out A as CAPITAL A and more like just 'a', and i will make an attempt to make the voice less robot-y (or at least do some research on how to) 
 
@@ -57,3 +57,5 @@ Day 25: didn't even add anything - off day.
 Day 26: Added 6 words to the dataset. Tomorrow I will add 5-6 more, and maybe add like emotions logic as I learned that the amount of facial expression while you're signing it shows how intense you're experiencing that emotion.
 
 Day 27: Alrighty today I added 7 words, made hand tracking a bit more accurate & finally incorporated the emotion logic. Tomorrow I'll add more words, maybe make the UI for the collect_words.py cuter as well.
+
+Day 28: Added 10 words, initialized git lfs for my dataset as it wasn't pushing to git. Tomorrow I'll make the ui cuter for collect_words.py and add more words.
