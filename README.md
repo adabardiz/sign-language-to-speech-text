@@ -59,3 +59,5 @@ Day 26: Added 6 words to the dataset. Tomorrow I will add 5-6 more, and maybe ad
 Day 27: Alrighty today I added 7 words, made hand tracking a bit more accurate & finally incorporated the emotion logic. Tomorrow I'll add more words, maybe make the UI for the collect_words.py cuter as well.
 
 Day 28: Added 10 words, initialized git lfs for my dataset as it wasn't pushing to git. Tomorrow I'll make the ui cuter for collect_words.py and add more words.
+
+Day 29: Added 14 words, tomorrow I'll make the ui cuter i lit had no time tday
