@@ -1,6 +1,7 @@
 import cv2
 import numpy as np
 import mediapipe as mp
+import mediapipe.python.solutions.face_mesh as mp_face_mesh
 import time
 import csv
 import os
@@ -23,7 +24,7 @@ KEY_FACE_INDICES = [
     362, 263, 386, 374, # right eye
     70, 63, 105, 66,    # left eyebrow
     300, 293, 334, 296, # right eyebrow
-    61, 291, 0, 17, 13, 14, # outer & inner mouth
+    61, 291, 0, 17, 13, 14, 
     78, 308, 82, 312    # lip curves
 ]
 
@@ -73,7 +74,6 @@ def delete_last_csv_row(filepath):
 
 def main():
     base_options = python.BaseOptions(model_asset_path="hand_landmarker.task")
-    # tuned confidence levels for smoother tracking during active gestures
     options = vision.HandLandmarkerOptions(
         base_options=base_options, 
         running_mode=vision.RunningMode.VIDEO, 
@@ -84,7 +84,6 @@ def main():
     )
     detector = vision.HandLandmarker.create_from_options(options)
 
-    mp_face_mesh = mp.solutions.face_mesh
     face_mesh = mp_face_mesh.FaceMesh(
         max_num_faces=1,
         refine_landmarks=False,
@@ -113,7 +112,6 @@ def main():
         print("empty input. exiting.")
         return
 
-    # normalize slash-separated words (e.g., 'done / finish' -> 'DONE/FINISH')
     word_to_record = "/".join([w.strip().upper() for w in word_input.split("/") if w.strip()])
 
     try:
@@ -202,7 +200,7 @@ def main():
 
                     for hand_landmarks in valid_hands:
                         for connection in HAND_CONNECTIONS:
-                            start_p = (int(hand_landmarks[connection[0]].x * w), int(hand_landmarks[connection[0]].y * h))
+                            start_p = (int(hand_landmarks[connection[0]].x * w), int(hand_landmarks[connection[1]].y * h))
                             end_p = (int(hand_landmarks[connection[1]].x * w), int(hand_landmarks[connection[1]].y * h))
                             cv2.line(frame, start_p, end_p, (255, 255, 255), 2)
                         for lm in hand_landmarks:
