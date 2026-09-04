@@ -35,7 +35,6 @@ HAND_CONNECTIONS = [
     (0, 5), (5, 9), (9, 13), (13, 17), (0, 17) # palm base
 ]
 
-# selected facial landmark indices for expression intensity tracking
 KEY_FACE_INDICES = [
     1,                  # nose tip anchor point
     33, 133, 159, 145,  # left eye bounds
@@ -93,7 +92,7 @@ def calculate_facial_intensity(face_landmarks):
     eyebrow_delta = abs(eyebrow_dist - neutral_eyebrow)
     eye_delta = max(0.0, eye_openness - neutral_eye)
 
-    #weight deltas to scores
+    # weight deltas to scores
     raw_score = (mouth_delta * 2.5) + (eyebrow_delta * 3.0) + (eye_delta * 2.0)
     intensity_multiplier = 1.0 + min(max(raw_score, 0.0), 1.5)
 
@@ -137,7 +136,6 @@ def aggregate_sequence(sequence_matrix):
     return np.hstack([mean_f, std_f, delta_f, max_f, min_f])
 
 def transform_tense(sentence, tense_target):
-    # simple text formatting hook for tenses
     clean_sent = sentence.strip()
     if not clean_sent:
         return ""
@@ -189,7 +187,6 @@ def draw_progress_bar(img, pt1, pt2, ratio, color=COLOR_TERRACOTTA):
     if fill_x2 > pt1[0] + 4:
         draw_rounded_rect(img, pt1, (fill_x2, pt2[1]), color, thickness=-1, radius=4)
 
-# tts & background inference workers
 class TextToSpeechEngine:
     def __init__(self):
         self.voices = ["Default Neutral", "Expressive"]
@@ -197,7 +194,6 @@ class TextToSpeechEngine:
         self.current_voice_label = self.voices[self.voice_idx]
 
     def speak(self, text, tone="neutral", intensity=1.0):
-        # logging tts speech output along with intensity context
         intensity_tag = f" [{intensity}x]" if intensity > 1.2 else ""
         print(f"[TTS ({tone}){intensity_tag}]: {text}")
 
@@ -238,18 +234,22 @@ def main():
     asl_word_model = None
     if os.path.exists("asl_word_model.pkl"):
         asl_word_model = joblib.load("asl_word_model.pkl")
-        print("loaded asl_word_model.pkl")
+        print("Loaded asl_word_model.pkl")
 
     letter_model = None
-    if os.path.exists("asl_letter_model.pkl"):
+    if os.path.exists("asl_model.pkl"):
+        letter_model = joblib.load("asl_model.pkl")
+        print("Loaded asl_model.pkl")
+    elif os.path.exists("asl_letter_model.pkl"):
         letter_model = joblib.load("asl_letter_model.pkl")
+        print("Loaded asl_letter_model.pkl")
     elif os.path.exists("model.pkl"):
         letter_model = joblib.load("model.pkl")
+        print("Loaded model.pkl")
 
     bg_ai = BackgroundAIThread(letter_model=letter_model)
     tts = TextToSpeechEngine()
 
-    # setup mediapipe tasks
     base_options = python.BaseOptions(model_asset_path="hand_landmarker.task")
     options = vision.HandLandmarkerOptions(
         base_options=base_options, 
@@ -277,7 +277,6 @@ def main():
     cv2.namedWindow(window_name)
     cv2.setMouseCallback(window_name, on_mouse_click)
 
-    # application states
     current_mode = "SPELL"
     word_sequence_buffer = deque(maxlen=30)
     last_word_pred_time = 0.0
@@ -327,7 +326,6 @@ def main():
         with bg_ai.result_lock:
             predicted_letter = bg_ai.predicted_letter
 
-        # handle mouse interactions across interface overlays
         if mouse_click_pos is not None:
             mx, my = mouse_click_pos
             mouse_click_pos = None
@@ -473,7 +471,6 @@ def main():
         face_lms = face_results.multi_face_landmarks[0].landmark if face_results.multi_face_landmarks else None
         face_feats = extract_face_features(face_lms)
         
-        # calculate facial intensity multiplier from facial landmarks
         intensity_mult, intensity_label = calculate_facial_intensity(face_lms)
 
         hand_detected = False
@@ -543,7 +540,7 @@ def main():
         if is_recording and not open_hand and not space_gesture_detected and hand_detected and not selecting_synonym:
             if current_mode == "SPELL":
                 if predicted_letter == current_holding_letter:
-                    if time.time() - letter_hold_start_time >= HOLD_LETTER_DURATION:
+                    if letter_hold_start_time and (time.time() - letter_hold_start_time >= HOLD_LETTER_DURATION):
                         current_word += predicted_letter
                         tts.speak(predicted_letter, tone="neutral", intensity=intensity_mult)
                         letter_hold_start_time = time.time()  
@@ -561,8 +558,14 @@ def main():
                         try:
                             predicted_word = asl_word_model.predict([aggregated_vec])[0]
                             if predicted_word:
-                                # adjust intensity prefix if facial intensity is high
-                                word_str = predicted_word.strip()
+                                word_str = str(predicted_word).strip()
+                                
+                                # Detect and strip emotion tag (e)
+                                is_emotion_word = False
+                                if "(e)" in word_str.lower():
+                                    is_emotion_word = True
+                                    word_str = word_str.replace("(e)", "").replace("(E)", "").strip()
+
                                 if intensity_label == "EXTREME":
                                     word_str = f"VERY {word_str}"
 
@@ -571,9 +574,10 @@ def main():
                                     selecting_synonym = True
                                 else:
                                     current_word += f"{word_str} "
-                                    tts.speak(word_str, tone=selected_tone, intensity=intensity_mult)
+                                    word_tone = word_str.lower() if is_emotion_word else selected_tone
+                                    tts.speak(word_str, tone=word_tone, intensity=intensity_mult)
                         except Exception as e:
-                            print("word prediction error:", e)
+                            print("Word prediction error:", e)
 
                         word_sequence_buffer.clear()
                         last_word_pred_time = time.time()
@@ -582,7 +586,7 @@ def main():
         else:
             letter_hold_start_time, current_holding_letter = None, None
 
-        # render action buttons
+        # render UI controls
         rec_bg = COLOR_SAGE if not is_recording else COLOR_ROSE
         rec_txt_color = (255, 255, 255)
         rec_btn_text = "STOP" if is_recording else "START"
@@ -752,7 +756,7 @@ def main():
         if is_converting_tense:
             draw_rounded_rect(frame, (cx - 180, cy - 25), (cx + 180, cy + 25), COLOR_BG_CARD, thickness=-1, radius=10)
             draw_rounded_rect(frame, (cx - 180, cy - 25), (cx + 180, cy + 25), COLOR_BORDER, thickness=1, radius=10)
-            cv2.putText(frame, "Refining translation with Gemini...", (cx - 150, cy + 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, COLOR_TEXT_DARK, 1, cv2.LINE_AA)
+            cv2.putText(frame, "Refining translation...", (cx - 150, cy + 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, COLOR_TEXT_DARK, 1, cv2.LINE_AA)
 
         # gesture progress bars at frame bottom
         if open_hand_start_time and current_mode == "SPELL":
