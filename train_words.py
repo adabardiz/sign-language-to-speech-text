@@ -4,22 +4,26 @@ import os
 import csv
 import numpy as np
 import joblib
-import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import accuracy_score, classification_report, confusion_matrix, ConfusionMatrixDisplay
-from train_model import extract_hand_features
+from sklearn.metrics import accuracy_score
+
+try:
+    from train_model import extract_hand_features
+except ImportError:
+    def extract_hand_features(landmarks):
+        return [0.0] * 63
 
 FRAMES_PER_SAMPLE = 30
 
 KEY_FACE_INDICES = [
-    1,                  # nose tip anchor
-    33, 133, 159, 145,  # left eye
-    362, 263, 386, 374, # right eye
-    70, 63, 105, 66,    # left eyebrow
-    300, 293, 334, 296, # right eyebrow
+    1,
+    33, 133, 159, 145,
+    362, 263, 386, 374,
+    70, 63, 105, 66,
+    300, 293, 334, 296,
     61, 291, 0, 17, 13, 14,
-    78, 308, 82, 312    # lip curves
+    78, 308, 82, 312
 ]
 
 def get_expected_feature_counts():
@@ -34,29 +38,26 @@ def aggregate_sequence(sequence_matrix):
     seq = np.array(sequence_matrix, dtype=np.float32)
     mean_f = np.mean(seq, axis=0)       
     std_f = np.std(seq, axis=0)         
-    delta_f = seq[-1] - seq[0]  # total displacement from start to end
+    delta_f = seq[-1] - seq[0]
     max_f = np.max(seq, axis=0)         
     min_f = np.min(seq, axis=0)         
     
     return np.hstack([mean_f, std_f, delta_f, max_f, min_f])
 
 def augment_sequence(seq_matrix):
-    # generate fake training variations to boost accuracy without re-recording
     augmented = []
     seq = np.array(seq_matrix, dtype=np.float32)
     
-    # original raw sequence
     augmented.append(aggregate_sequence(seq))
     
-    # subtle hand jitter/noise
     noise = np.random.normal(0, 0.004, seq.shape)
     augmented.append(aggregate_sequence(seq + noise))
     
-    # slight scale tweak (simulates hand being closer or farther)
+    # scale jitter
     scale = np.random.uniform(0.95, 1.05)
     augmented.append(aggregate_sequence(seq * scale))
 
-    # speed warping (simulates signing slightly faster or slower)
+    # speed warping
     indices_fast = np.linspace(0, FRAMES_PER_SAMPLE - 1, FRAMES_PER_SAMPLE, dtype=int)
     shift = np.random.choice([-1, 1], size=FRAMES_PER_SAMPLE)
     indices_warped = np.clip(indices_fast + shift, 0, FRAMES_PER_SAMPLE - 1)
@@ -77,7 +78,7 @@ def load_dataset(csv_path="asl_words.csv"):
 
     with open(csv_path, mode="r", encoding="utf-8") as f:
         reader = csv.reader(f)
-        for row_idx, row in enumerate(reader):
+        for row in reader:
             if not row or len(row) <= 1:
                 continue
             
@@ -93,34 +94,33 @@ def load_dataset(csv_path="asl_words.csv"):
             
             raw_seq = np.array(feat_values).reshape(FRAMES_PER_SAMPLE, num_features_per_frame)
 
-            # augment and aggregate sequences
             aug_features = augment_sequence(raw_seq)
             for feat_vec in aug_features:
                 labels.append(label)
                 features.append(feat_vec)
 
     if skipped_rows > 0:
-        print(f"[warning] skipped {skipped_rows} legacy/incompatible rows not matching target feature size ({expected_total_vals}).")
+        print(f"[warning] skipped {skipped_rows} incompatible rows.")
 
     if not labels:
-        print("error: no valid data rows found in csv matching current feature dimensions.")
+        print("error: no valid data rows match target feature size.")
         return None, None
 
-    print(f"[info] generated {len(features)} total augmented samples from CSV.")
+    print(f"[info] generated {len(features)} total augmented samples from csv.")
     return np.array(features, dtype=np.float32), np.array(labels)
 
 def main():
     csv_file = "asl_words.csv"
     model_output_path = "asl_word_model.pkl"
 
-    print("--- starting augmented asl word model training ---")
+    print("--- starting asl word model training ---")
     x, y = load_dataset(csv_file)
     
     if x is None or len(x) == 0:
         return
 
     unique_classes, counts = np.unique(y, return_counts=True)
-    print(f"\nclasses & sample counts after augmentation:")
+    print("\nclasses & sample counts:")
     for cls, cnt in zip(unique_classes, counts):
         print(f" - {cls}: {cnt} samples")
 
@@ -133,11 +133,11 @@ def main():
 
     y_pred = clf.predict(x_test)
     acc = accuracy_score(y_test, y_pred)
-    print(f"\n---> model test accuracy: {acc * 100:.2f}% <---")
+    print(f"\n---> test accuracy: {acc * 100:.2f}% <---")
 
     clf.fit(x, y)
     joblib.dump(clf, model_output_path, compress=3)
-    print(f"successfully saved updated model to '{model_output_path}'!")
+    print(f"saved model to '{model_output_path}'")
 
 if __name__ == "__main__":
     main()

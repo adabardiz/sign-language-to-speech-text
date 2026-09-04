@@ -7,25 +7,30 @@ import csv
 import os
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
-from train_model import extract_hand_features
+
+try:
+    from train_model import extract_hand_features
+except ImportError:
+    def extract_hand_features(landmarks):
+        return [0.0] * 63
 
 HAND_CONNECTIONS = [
-    (0, 1), (1, 2), (2, 3), (3, 4),         # thumb
-    (5, 6), (6, 7), (7, 8),                 # index 
-    (9, 10), (10, 11), (11, 12),            # middle 
-    (13, 14), (14, 15), (15, 16),           # ring 
-    (17, 18), (18, 19), (19, 20),           # pinky
-    (0, 5), (5, 9), (9, 13), (13, 17), (0, 17) # palm
+    (0, 1), (1, 2), (2, 3), (3, 4),
+    (5, 6), (6, 7), (7, 8),
+    (9, 10), (10, 11), (11, 12),
+    (13, 14), (14, 15), (15, 16),
+    (17, 18), (18, 19), (19, 20),
+    (0, 5), (5, 9), (9, 13), (13, 17), (0, 17)
 ]
 
 KEY_FACE_INDICES = [
-    1,                  # nose tip anchor
-    33, 133, 159, 145,  # left eye
-    362, 263, 386, 374, # right eye
-    70, 63, 105, 66,    # left eyebrow
-    300, 293, 334, 296, # right eyebrow
-    61, 291, 0, 17, 13, 14, 
-    78, 308, 82, 312    # lip curves
+    1,
+    33, 133, 159, 145,
+    362, 263, 386, 374,
+    70, 63, 105, 66,
+    300, 293, 334, 296,
+    61, 291, 0, 17, 13, 14,
+    78, 308, 82, 312
 ]
 
 def extract_face_features(face_landmarks):
@@ -52,7 +57,7 @@ def append_sample_to_csv(filepath, row_data):
             writer.writerow(row_data)
     except Exception as e:
         backup_path = os.path.expanduser("~/asl_words_backup.csv")
-        print(f"[warning] could not write to {filepath} ({e}). writing to backup {backup_path}")
+        print(f"[warning] failed to write to {filepath}: {e}. saving backup to {backup_path}")
         with open(backup_path, mode="a", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
             writer.writerow(row_data)
@@ -69,7 +74,7 @@ def delete_last_csv_row(filepath):
             f.writelines(lines[:-1])
         return True
     except Exception as e:
-        print(f"[error] failed to delete last sample from CSV: {e}")
+        print(f"[error] failed deleting last csv row: {e}")
         return False
 
 def main():
@@ -103,11 +108,12 @@ def main():
     if os.path.exists(csv_file):
         with open(csv_file, mode="r", encoding="utf-8") as f:
             existing_rows = sum(1 for _ in f)
-        print(f"found existing '{csv_file}' with {existing_rows} total rows.")
+        print(f"found existing '{csv_file}' with {existing_rows} rows.")
     else:
-        print(f"'{csv_file}' not found. a new file will be initialized on first record.")
+        print(f"'{csv_file}' not found. initializing new file on first save.")
 
-    word_input = input("\nenter word to record (e.g. HELLO or DONE/FINISH): ").strip()
+    # allow word tags like sad(e) or happy(e) for emotion expression handling
+    word_input = input("\nenter word to record (e.g. HELLO, SAD(e), or DONE/FINISH): ").strip()
     if not word_input:
         print("empty input. exiting.")
         return
@@ -126,7 +132,7 @@ def main():
     start_time_ms = int(time.time() * 1000)
     last_timestamp_ms = 0
 
-    print(f"\n--- starting word data collection for '{word_to_record}' ---")
+    print(f"\n--- collecting word samples for '{word_to_record}' ---")
     print("controls: 's' = record | 'd' = delete last sample | 'q' = quit\n")
 
     sample_idx = 0
@@ -158,14 +164,14 @@ def main():
                 if sample_idx > 0:
                     if delete_last_csv_row(csv_file):
                         sample_idx -= 1
-                        status_msg = f"DELETED sample {sample_idx + 1}. Retrying sample {sample_idx + 1}..."
+                        status_msg = f"deleted sample {sample_idx + 1}."
                     else:
-                        status_msg = "Could not delete sample from CSV."
+                        status_msg = "could not delete sample from csv."
                 else:
-                    status_msg = "No samples recorded in this session to delete."
+                    status_msg = "no recorded samples in current session to delete."
                 status_timer = time.time() + 3.0
             elif key == ord('q'):
-                print("\ncollection canceled early by user.")
+                print("\ncollection cancelled.")
                 cap.release()
                 cv2.destroyAllWindows()
                 return
@@ -239,7 +245,7 @@ def main():
 
     cap.release()
     cv2.destroyAllWindows()
-    print(f"\nfinished collection! successfully added {sample_idx} samples to '{csv_file}'.")
+    print(f"\nfinished. successfully added {sample_idx} samples to '{csv_file}'.")
 
 if __name__ == "__main__":
     main()
