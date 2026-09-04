@@ -13,9 +13,12 @@ try:
     from train_model import extract_hand_features
 except ImportError:
     def extract_hand_features(landmarks):
-        return [0.0] * 63  
+        if len(landmarks) == 0:
+            return [0.0] * 63
+        wrist = landmarks[0]
+        norm = landmarks - wrist
+        return norm.flatten().tolist()
 
-# soft color palette for the opencv ui
 COLOR_BG_CARD = (245, 245, 245)
 COLOR_BORDER = (210, 210, 210)
 COLOR_TEXT_DARK = (40, 40, 40)
@@ -447,7 +450,7 @@ def main():
                     ).start()
 
             elif not is_recording and finished_word:
-                btn_y1, btn_y2 = cy + 20, cy + 65
+                btn_y1, btn_y2 = cy + 60, cy + 105
                 if (cx - 305) <= mx <= (cx - 115) and btn_y1 <= my <= btn_y2:
                     tts.speak(finished_word, selected_tone)
                 elif (cx - 95) <= mx <= (cx + 95) and btn_y1 <= my <= btn_y2:
@@ -560,7 +563,7 @@ def main():
                             if predicted_word:
                                 word_str = str(predicted_word).strip()
                                 
-                                # Detect and strip emotion tag (e)
+                                # detect and strip emotion tag (e)
                                 is_emotion_word = False
                                 if "(e)" in word_str.lower():
                                     is_emotion_word = True
@@ -650,6 +653,7 @@ def main():
             disp_word = f"{current_word}_" if current_word else "..."
             cv2.putText(frame, disp_word, (32, 138), cv2.FONT_HERSHEY_SIMPLEX, 0.9, COLOR_TEXT_DARK, 2, cv2.LINE_AA)
 
+        # letter and word detection progress bars
         if is_recording and not open_hand and not space_gesture_detected and hand_detected and not selecting_synonym:
             if current_mode == "SPELL" and current_holding_letter and current_holding_letter != "-" and letter_hold_start_time:
                 letter_elapsed = min(time.time() - letter_hold_start_time, HOLD_LETTER_DURATION)
@@ -686,114 +690,99 @@ def main():
 
         # punctuation selection modal
         if selecting_punctuation:
-            box_w, box_h = 700, 190
+            box_w, box_h = 700, 180
             m_x1, m_y1 = cx - box_w // 2, cy - box_h // 2
             m_x2, m_y2 = cx + box_w // 2, cy + box_h // 2
             draw_rounded_rect(frame, (m_x1, m_y1), (m_x2, m_y2), COLOR_OVERLAY_BG, thickness=-1, radius=16)
             draw_rounded_rect(frame, (m_x1, m_y1), (m_x2, m_y2), COLOR_BORDER, thickness=1, radius=16)
-
-            btn_y1 = cy - 10
-            btn_h = 80
 
             if punct_sub is None:
-                title = "SELECT SENTENCE PUNCTUATION"
+                title = "SELECT PUNCTUATION"
                 t_size = cv2.getTextSize(title, cv2.FONT_HERSHEY_SIMPLEX, 0.65, 2)[0]
-                cv2.putText(frame, title, (cx - t_size[0] // 2, cy - 40), cv2.FONT_HERSHEY_SIMPLEX, 0.65, COLOR_TEXT_DARK, 2, cv2.LINE_AA)
+                cv2.putText(frame, title, (cx - t_size[0] // 2, cy - 35), cv2.FONT_HERSHEY_SIMPLEX, 0.65, COLOR_TEXT_DARK, 2, cv2.LINE_AA)
 
-                draw_pill_button(frame, (cx - 320, btn_y1), (cx - 120, btn_y1 + btn_h), COLOR_SAND, ". (PERIOD)", font_scale=0.55)
-                draw_pill_button(frame, (cx - 100, btn_y1), (cx + 100, btn_y1 + btn_h), COLOR_TERRACOTTA, "! (EXCLAMATION)", text_color=(255, 255, 255), font_scale=0.5)
-                draw_pill_button(frame, (cx + 120, btn_y1), (cx + 320, btn_y1 + btn_h), COLOR_SAND, "? (QUESTION)", font_scale=0.55)
+                draw_pill_button(frame, (cx - 320, cy - 10), (cx - 120, cy + 50), COLOR_SAND, ". (Period)", text_color=COLOR_TEXT_DARK, font_scale=0.55)
+                draw_pill_button(frame, (cx - 100, cy - 10), (cx + 100, cy + 50), COLOR_SAGE, "! (Exclamation)", text_color=(255, 255, 255), font_scale=0.55)
+                draw_pill_button(frame, (cx + 120, cy - 10), (cx + 320, cy + 50), COLOR_TERRACOTTA, "? (Question)", text_color=(255, 255, 255), font_scale=0.55)
 
             elif punct_sub == "PERIOD":
-                title = "SELECT EXPRESSION TONE"
+                title = "PERIOD (.) INTENT & TONE"
                 t_size = cv2.getTextSize(title, cv2.FONT_HERSHEY_SIMPLEX, 0.65, 2)[0]
-                cv2.putText(frame, title, (cx - t_size[0] // 2, cy - 40), cv2.FONT_HERSHEY_SIMPLEX, 0.65, COLOR_TEXT_DARK, 2, cv2.LINE_AA)
+                cv2.putText(frame, title, (cx - t_size[0] // 2, cy - 35), cv2.FONT_HERSHEY_SIMPLEX, 0.65, COLOR_TEXT_DARK, 2, cv2.LINE_AA)
 
-                draw_pill_button(frame, (cx - 300, btn_y1), (cx - 110, btn_y1 + btn_h), COLOR_SAND, "NEUTRAL", font_scale=0.55)
-                draw_pill_button(frame, (cx - 95, btn_y1), (cx + 95, btn_y1 + btn_h), COLOR_SAND, "SAD", font_scale=0.55)
-                draw_pill_button(frame, (cx + 110, btn_y1), (cx + 300, btn_y1 + btn_h), COLOR_TERRACOTTA, "SARCASTIC", text_color=(255, 255, 255), font_scale=0.55)
+                draw_pill_button(frame, (cx - 300, cy - 10), (cx - 110, cy + 50), COLOR_SAND, "Neutral", text_color=COLOR_TEXT_DARK, font_scale=0.55)
+                draw_pill_button(frame, (cx - 95, cy - 10), (cx + 95, cy + 50), COLOR_ROSE, "Sad", text_color=(255, 255, 255), font_scale=0.55)
+                draw_pill_button(frame, (cx + 110, cy - 10), (cx + 300, cy + 50), COLOR_TERRACOTTA, "Sarcastic", text_color=(255, 255, 255), font_scale=0.55)
 
             elif punct_sub == "EXCLAMATION":
-                title = "SELECT EXPRESSION TONE"
+                title = "EXCLAMATION (!) TONE"
                 t_size = cv2.getTextSize(title, cv2.FONT_HERSHEY_SIMPLEX, 0.65, 2)[0]
-                cv2.putText(frame, title, (cx - t_size[0] // 2, cy - 40), cv2.FONT_HERSHEY_SIMPLEX, 0.65, COLOR_TEXT_DARK, 2, cv2.LINE_AA)
+                cv2.putText(frame, title, (cx - t_size[0] // 2, cy - 35), cv2.FONT_HERSHEY_SIMPLEX, 0.65, COLOR_TEXT_DARK, 2, cv2.LINE_AA)
 
-                draw_pill_button(frame, (cx - 200, btn_y1), (cx - 10, btn_y1 + btn_h), COLOR_SAGE, "HAPPY", text_color=(255, 255, 255), font_scale=0.6)
-                draw_pill_button(frame, (cx + 10, btn_y1), (cx + 200, btn_y1 + btn_h), COLOR_ROSE, "ANGRY", text_color=(255, 255, 255), font_scale=0.6)
+                draw_pill_button(frame, (cx - 200, cy - 10), (cx - 10, cy + 50), COLOR_SAGE, "Happy", text_color=(255, 255, 255), font_scale=0.55)
+                draw_pill_button(frame, (cx + 10, cy - 10), (cx + 200, cy + 50), COLOR_TERRACOTTA, "Angry", text_color=(255, 255, 255), font_scale=0.55)
 
             elif punct_sub == "QUESTION":
-                title = "SELECT EXPRESSION TONE"
+                title = "QUESTION (?) TONE"
                 t_size = cv2.getTextSize(title, cv2.FONT_HERSHEY_SIMPLEX, 0.65, 2)[0]
-                cv2.putText(frame, title, (cx - t_size[0] // 2, cy - 40), cv2.FONT_HERSHEY_SIMPLEX, 0.65, COLOR_TEXT_DARK, 2, cv2.LINE_AA)
+                cv2.putText(frame, title, (cx - t_size[0] // 2, cy - 35), cv2.FONT_HERSHEY_SIMPLEX, 0.65, COLOR_TEXT_DARK, 2, cv2.LINE_AA)
 
-                draw_pill_button(frame, (cx - 200, btn_y1), (cx - 10, btn_y1 + btn_h), COLOR_TERRACOTTA, "QUESTION", text_color=(255, 255, 255), font_scale=0.55)
-                draw_pill_button(frame, (cx + 10, btn_y1), (cx + 200, btn_y1 + btn_h), COLOR_SAND, "SARCASTIC", font_scale=0.55)
+                draw_pill_button(frame, (cx - 200, cy - 10), (cx - 10, cy + 50), COLOR_SAND, "Surprised", text_color=COLOR_TEXT_DARK, font_scale=0.55)
+                draw_pill_button(frame, (cx + 10, cy - 10), (cx + 200, cy + 50), COLOR_TERRACOTTA, "Sarcastic", text_color=(255, 255, 255), font_scale=0.55)
 
-        # grammar tense selection modal
+        # tense transformation modal
         if selecting_tense:
-            box_w, box_h = 550, 240
+            box_w, box_h = 520, 180
             m_x1, m_y1 = cx - box_w // 2, cy - box_h // 2
             m_x2, m_y2 = cx + box_w // 2, cy + box_h // 2
-
             draw_rounded_rect(frame, (m_x1, m_y1), (m_x2, m_y2), COLOR_OVERLAY_BG, thickness=-1, radius=16)
             draw_rounded_rect(frame, (m_x1, m_y1), (m_x2, m_y2), COLOR_BORDER, thickness=1, radius=16)
 
-            title = "SELECT TARGET GRAMMAR TENSE"
+            title = "TRANSFORM TENSE"
             t_size = cv2.getTextSize(title, cv2.FONT_HERSHEY_SIMPLEX, 0.65, 2)[0]
-            cv2.putText(frame, title, (cx - t_size[0] // 2, cy - 70), cv2.FONT_HERSHEY_SIMPLEX, 0.65, COLOR_TEXT_DARK, 2, cv2.LINE_AA)
+            cv2.putText(frame, title, (cx - t_size[0] // 2, cy - 35), cv2.FONT_HERSHEY_SIMPLEX, 0.65, COLOR_TEXT_DARK, 2, cv2.LINE_AA)
 
-            sub_txt = f"'{temp_sentence}'"
-            s_size = cv2.getTextSize(sub_txt, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 1)[0]
-            cv2.putText(frame, sub_txt, (cx - s_size[0] // 2, cy - 40), cv2.FONT_HERSHEY_SIMPLEX, 0.55, COLOR_TEXT_MUTED, 1, cv2.LINE_AA)
+            draw_pill_button(frame, (cx - 210, cy - 10), (cx - 10, cy + 35), COLOR_SAGE, "PRESENT (NOW)", text_color=(255, 255, 255), font_scale=0.5)
+            draw_pill_button(frame, (cx + 10, cy - 10), (cx + 210, cy + 35), COLOR_TERRACOTTA, "PAST", text_color=(255, 255, 255), font_scale=0.5)
+            draw_pill_button(frame, (cx - 210, cy + 50), (cx - 10, cy + 95), COLOR_SAND, "FUTURE", text_color=COLOR_TEXT_DARK, font_scale=0.5)
+            draw_pill_button(frame, (cx + 10, cy + 50), (cx + 210, cy + 95), COLOR_ROSE, "ORIGINAL", text_color=(255, 255, 255), font_scale=0.5)
 
-            btn_h = 45
+        # finished translation action modal
+        if not is_recording and finished_word and not selecting_punctuation and not selecting_tense:
+            box_w, box_h = 650, 120
+            m_x1, m_y1 = cx - box_w // 2, cy + 10
+            m_x2, m_y2 = cx + box_w // 2, cy + 130
+            draw_rounded_rect(frame, (m_x1, m_y1), (m_x2, m_y2), COLOR_BG_CARD, thickness=-1, radius=14)
+            draw_rounded_rect(frame, (m_x1, m_y1), (m_x2, m_y2), COLOR_BORDER, thickness=1, radius=14)
 
-            draw_pill_button(frame, (cx - 210, cy - 10), (cx - 10, cy - 10 + btn_h), COLOR_TERRACOTTA, "NOW (-ing)", text_color=(255, 255, 255), font_scale=0.55)
-            draw_pill_button(frame, (cx + 10, cy - 10), (cx + 210, cy - 10 + btn_h), COLOR_SAND, "PAST", font_scale=0.55)
-            draw_pill_button(frame, (cx - 210, cy + 50), (cx - 10, cy + 50 + btn_h), COLOR_SAND, "FUTURE", font_scale=0.55)
-            draw_pill_button(frame, (cx + 10, cy + 50), (cx + 210, cy + 50 + btn_h), COLOR_SAND, "ORIGINAL", font_scale=0.55)
+            cv2.putText(frame, f"TRANSLATION: \"{finished_word}\"", (m_x1 + 20, m_y1 + 35), cv2.FONT_HERSHEY_SIMPLEX, 0.6, COLOR_TEXT_DARK, 2, cv2.LINE_AA)
 
-        if is_converting_tense:
-            draw_rounded_rect(frame, (cx - 180, cy - 25), (cx + 180, cy + 25), COLOR_BG_CARD, thickness=-1, radius=10)
-            draw_rounded_rect(frame, (cx - 180, cy - 25), (cx + 180, cy + 25), COLOR_BORDER, thickness=1, radius=10)
-            cv2.putText(frame, "Refining translation...", (cx - 150, cy + 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, COLOR_TEXT_DARK, 1, cv2.LINE_AA)
-
-        # gesture progress bars at frame bottom
-        if open_hand_start_time and current_mode == "SPELL":
-            hold_elapsed = min(time.time() - open_hand_start_time, TOGGLE_GESTURE_DURATION)
-            progress_ratio = hold_elapsed / TOGGLE_GESTURE_DURATION
-            action_text = "Stopping..." if is_recording else "Starting..."
-            cv2.putText(frame, f"Hold open palm: {action_text}", (20, h - 45), cv2.FONT_HERSHEY_SIMPLEX, 0.45, COLOR_TEXT_DARK, 1, cv2.LINE_AA)
-            draw_progress_bar(frame, (20, h - 35), (220, h - 23), progress_ratio, color=COLOR_TERRACOTTA)
-
-        if space_start_time:
-            space_elapsed = min(time.time() - space_start_time, ACTION_GESTURE_DURATION)
-            s_ratio = space_elapsed / ACTION_GESTURE_DURATION
-            cv2.putText(frame, "Adding space...", (250, h - 45), cv2.FONT_HERSHEY_SIMPLEX, 0.45, COLOR_TEXT_DARK, 1, cv2.LINE_AA)
-            draw_progress_bar(frame, (250, h - 35), (450, h - 23), s_ratio, color=COLOR_SAGE)
+            draw_pill_button(frame, (cx - 305, cy + 60), (cx - 115, cy + 105), COLOR_SAGE, "SPEAK AGAIN", text_color=(255, 255, 255), font_scale=0.5)
+            draw_pill_button(frame, (cx - 95, cy + 60), (cx + 95, cy + 105), COLOR_TERRACOTTA, "CHANGE TONE", text_color=(255, 255, 255), font_scale=0.5)
+            draw_pill_button(frame, (cx + 115, cy + 60), (cx + 305, cy + 105), COLOR_ROSE, "DISMISS", text_color=(255, 255, 255), font_scale=0.5)
 
         cv2.imshow(window_name, frame)
 
         key = cv2.waitKey(1) & 0xFF
         if key == ord('q'):
             bg_ai.running = False
-            cap.release()
-            cv2.destroyAllWindows()
             break
+        elif key == ord('v'):
+            tts.toggle_voice()
         elif key == ord('m'):
             current_mode = "WORD" if current_mode == "SPELL" else "SPELL"
-            selecting_synonym = False
             word_sequence_buffer.clear()
             last_word_pred_time = 0.0
         elif key == ord('s'):
             current_mode = "WORD"
             is_recording = True
-            current_word, finished_word = "", ""
-            selecting_punctuation, punct_sub, selecting_tense, selecting_synonym = False, None, False, False
+            current_word = ""
+            finished_word = ""
             word_sequence_buffer.clear()
             last_word_pred_time = 0.0
-        elif key == ord('v'):
-            tts.toggle_voice()
+
+    cap.release()
+    cv2.destroyAllWindows()
 
 if __name__ == "__main__":
     main()
