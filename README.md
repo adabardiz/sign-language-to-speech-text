@@ -62,4 +62,4 @@ Day 28: Added 10 words, initialized git lfs for my dataset as it wasn't pushing 
 
 Day 29: Added 14 words, tomorrow I'll make the ui cuter i lit had no time tday
 
-Day 30: 1 Month! Yipeee, today I made the ui cuter for collect_words.py, re-imagined the emotions logic: its (e) for any emotions that are being recorded into collect_words.py, re-incorporated the progress bar for detecting in detector.py, and a few things i dont think i can remember.
+Day 30: 1 Month! Yipeee, today I made the ui cuter for collect_words.py, re-imagined the emotions logic: its (e) for any emotions that are being recorded into collect_words.py, re-incorporated the progress bar for detecting in detector.py, and a few things i dont think i can remember. I also added like 8 words, tomorrow I'll add words, add emotions & also maybe look into making this algorithm an app.
