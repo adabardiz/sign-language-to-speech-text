@@ -14,6 +14,16 @@ except ImportError:
     def extract_hand_features(landmarks):
         return [0.0] * 63
 
+COLOR_BG_DARK = (30, 24, 32)
+COLOR_CARD_BG = (45, 35, 50)
+COLOR_PINK = (210, 160, 255)
+COLOR_LAVENDER = (240, 190, 215)
+COLOR_MINT = (200, 245, 180)
+COLOR_CORAL = (140, 140, 255)
+COLOR_YELLOW = (170, 235, 255)
+COLOR_WHITE = (245, 245, 245)
+COLOR_GRAY = (120, 110, 125)
+
 HAND_CONNECTIONS = [
     (0, 1), (1, 2), (2, 3), (3, 4),
     (5, 6), (6, 7), (7, 8),
@@ -32,6 +42,34 @@ KEY_FACE_INDICES = [
     61, 291, 0, 17, 13, 14,
     78, 308, 82, 312
 ]
+
+def draw_rounded_rect(img, pt1, pt2, color, thickness=-1, radius=15):
+    x1, y1 = pt1
+    x2, y2 = pt2
+    w, h = x2 - x1, y2 - y1
+    radius = min(radius, w // 2, h // 2)
+
+    if thickness < 0:
+        cv2.rectangle(img, (x1 + radius, y1), (x2 - radius, y2), color, -1)
+        cv2.rectangle(img, (x1, y1 + radius), (x2, y2 - radius), color, -1)
+        cv2.circle(img, (x1 + radius, y1 + radius), radius, color, -1)
+        cv2.circle(img, (x2 - radius, y1 + radius), radius, color, -1)
+        cv2.circle(img, (x1 + radius, y2 - radius), radius, color, -1)
+        cv2.circle(img, (x2 - radius, y2 - radius), radius, color, -1)
+    else:
+        cv2.line(img, (x1 + radius, y1), (x2 - radius, y1), color, thickness)
+        cv2.line(img, (x1 + radius, y2), (x2 - radius, y2), color, thickness)
+        cv2.line(img, (x1, y1 + radius), (x1, y2 - radius), color, thickness)
+        cv2.line(img, (x2, y1 + radius), (x2, y2 - radius), color, thickness)
+        cv2.ellipse(img, (x1 + radius, y1 + radius), (radius, radius), 180, 0, 90, color, thickness)
+        cv2.ellipse(img, (x2 - radius, y1 + radius), (radius, radius), 270, 0, 90, color, thickness)
+        cv2.ellipse(img, (x1 + radius, y2 - radius), (radius, radius), 90, 0, 90, color, thickness)
+        cv2.ellipse(img, (x2 - radius, y2 - radius), (radius, radius), 0, 0, 90, color, thickness)
+
+def draw_alpha_card(img, pt1, pt2, color, alpha=0.70, radius=15):
+    overlay = img.copy()
+    draw_rounded_rect(overlay, pt1, pt2, color, thickness=-1, radius=radius)
+    cv2.addWeighted(overlay, alpha, img, 1 - alpha, 0, img)
 
 def extract_face_features(face_landmarks):
     if not face_landmarks:
@@ -57,7 +95,7 @@ def append_sample_to_csv(filepath, row_data):
             writer.writerow(row_data)
     except Exception as e:
         backup_path = os.path.expanduser("~/asl_words_backup.csv")
-        print(f"[warning] failed to write to {filepath}: {e}. saving backup to {backup_path}")
+        print(f"[warning] failed writing to {filepath}: {e}. backup saved to {backup_path}")
         with open(backup_path, mode="a", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
             writer.writerow(row_data)
@@ -112,7 +150,6 @@ def main():
     else:
         print(f"'{csv_file}' not found. initializing new file on first save.")
 
-    # allow word tags like sad(e) or happy(e) for emotion expression handling
     word_input = input("\nenter word to record (e.g. HELLO, SAD(e), or DONE/FINISH): ").strip()
     if not word_input:
         print("empty input. exiting.")
@@ -147,13 +184,29 @@ def main():
                 continue
             frame = cv2.flip(frame, 1)
 
-            cv2.putText(frame, f"word: {word_to_record} | sample {sample_idx + 1}/{samples_to_collect}", 
-                        (30, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2, cv2.LINE_AA)
-            cv2.putText(frame, "press 's' to record | 'd' to delete last | 'q' to exit", 
-                        (30, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1, cv2.LINE_AA)
+            # header info card
+            draw_alpha_card(frame, (20, 20), (480, 115), COLOR_CARD_BG, alpha=0.75, radius=18)
+            draw_rounded_rect(frame, (20, 20), (480, 115), COLOR_PINK, thickness=2, radius=18)
+            
+            # target label badge
+            draw_rounded_rect(frame, (35, 32), (150, 60), COLOR_PINK, thickness=-1, radius=10)
+            cv2.putText(frame, "TARGET", (50, 52), cv2.FONT_HERSHEY_SIMPLEX, 0.45, COLOR_BG_DARK, 2, cv2.LINE_AA)
+            cv2.putText(frame, word_to_record, (165, 55), cv2.FONT_HERSHEY_SIMPLEX, 0.75, COLOR_WHITE, 2, cv2.LINE_AA)
+            cv2.putText(frame, f"sample {sample_idx + 1} / {samples_to_collect}", (35, 95), cv2.FONT_HERSHEY_SIMPLEX, 0.55, COLOR_LAVENDER, 1, cv2.LINE_AA)
 
+            # bottom controls card
+            draw_alpha_card(frame, (20, 640), (580, 700), COLOR_CARD_BG, alpha=0.75, radius=15)
+            cv2.putText(frame, "[S] Record", (40, 678), cv2.FONT_HERSHEY_SIMPLEX, 0.55, COLOR_MINT, 2, cv2.LINE_AA)
+            cv2.putText(frame, "|", (165, 678), cv2.FONT_HERSHEY_SIMPLEX, 0.55, COLOR_GRAY, 1, cv2.LINE_AA)
+            cv2.putText(frame, "[D] Delete Last", (185, 678), cv2.FONT_HERSHEY_SIMPLEX, 0.55, COLOR_CORAL, 2, cv2.LINE_AA)
+            cv2.putText(frame, "|", (355, 678), cv2.FONT_HERSHEY_SIMPLEX, 0.55, COLOR_GRAY, 1, cv2.LINE_AA)
+            cv2.putText(frame, "[Q] Quit", (375, 678), cv2.FONT_HERSHEY_SIMPLEX, 0.55, COLOR_YELLOW, 2, cv2.LINE_AA)
+
+            # alert notification toast
             if time.time() < status_timer:
-                cv2.putText(frame, status_msg, (30, 130), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 165, 255), 2, cv2.LINE_AA)
+                draw_alpha_card(frame, (20, 130), (500, 175), COLOR_CARD_BG, alpha=0.85, radius=12)
+                draw_rounded_rect(frame, (20, 130), (500, 175), COLOR_CORAL, thickness=2, radius=12)
+                cv2.putText(frame, f"~ {status_msg}", (35, 160), cv2.FONT_HERSHEY_SIMPLEX, 0.55, COLOR_YELLOW, 2, cv2.LINE_AA)
 
             cv2.imshow("word data collector", frame)
             key = cv2.waitKey(1) & 0xFF
@@ -164,11 +217,11 @@ def main():
                 if sample_idx > 0:
                     if delete_last_csv_row(csv_file):
                         sample_idx -= 1
-                        status_msg = f"deleted sample {sample_idx + 1}."
+                        status_msg = f"deleted sample {sample_idx + 1}"
                     else:
-                        status_msg = "could not delete sample from csv."
+                        status_msg = "could not delete sample from csv"
                 else:
-                    status_msg = "no recorded samples in current session to delete."
+                    status_msg = "no recorded samples in current session"
                 status_timer = time.time() + 3.0
             elif key == ord('q'):
                 print("\ncollection cancelled.")
@@ -206,11 +259,13 @@ def main():
 
                     for hand_landmarks in valid_hands:
                         for connection in HAND_CONNECTIONS:
-                            start_p = (int(hand_landmarks[connection[0]].x * w), int(hand_landmarks[connection[1]].y * h))
+                            start_p = (int(hand_landmarks[connection[0]].x * w), int(hand_landmarks[connection[0]].y * h))
                             end_p = (int(hand_landmarks[connection[1]].x * w), int(hand_landmarks[connection[1]].y * h))
-                            cv2.line(frame, start_p, end_p, (255, 255, 255), 2)
+                            cv2.line(frame, start_p, end_p, COLOR_LAVENDER, 2, cv2.LINE_AA)
                         for lm in hand_landmarks:
-                            cv2.circle(frame, (int(lm.x * w), int(lm.y * h)), 4, (0, 255, 0), -1)
+                            cx, cy = int(lm.x * w), int(lm.y * h)
+                            cv2.circle(frame, (cx, cy), 5, COLOR_PINK, -1, cv2.LINE_AA)
+                            cv2.circle(frame, (cx, cy), 2, COLOR_WHITE, -1, cv2.LINE_AA)
 
             if hand_feats is None:
                 hand_feats = [0.0] * num_hand_features
@@ -222,18 +277,27 @@ def main():
             if face_lms:
                 for idx in KEY_FACE_INDICES:
                     lm = face_lms[idx]
-                    cv2.circle(frame, (int(lm.x * w), int(lm.y * h)), 2, (0, 255, 255), -1)
+                    cv2.circle(frame, (int(lm.x * w), int(lm.y * h)), 2, COLOR_MINT, -1, cv2.LINE_AA)
 
             frame_feats = list(hand_feats) + list(face_feats)
             sequence_features.extend(frame_feats)
 
             recorded_frames = len(sequence_features) // num_features_per_frame
-            cv2.putText(frame, f"RECORDING '{word_to_record}'... {recorded_frames}/{frames_per_sample}", 
-                        (30, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2, cv2.LINE_AA)
-            
             ratio = recorded_frames / frames_per_sample
-            cv2.rectangle(frame, (30, 80), (330, 95), (100, 100, 100), 2)
-            cv2.rectangle(frame, (30, 80), (30 + int(300 * ratio), 95), (0, 0, 255), -1)
+
+            # recording card & rounded progress bar
+            draw_alpha_card(frame, (20, 20), (520, 120), COLOR_CARD_BG, alpha=0.85, radius=18)
+            draw_rounded_rect(frame, (20, 20), (520, 120), COLOR_CORAL, thickness=2, radius=18)
+            
+            cv2.circle(frame, (45, 52), 7, COLOR_CORAL, -1, cv2.LINE_AA)
+            cv2.putText(frame, f"RECORDING '{word_to_record}'", (65, 58), cv2.FONT_HERSHEY_SIMPLEX, 0.65, COLOR_WHITE, 2, cv2.LINE_AA)
+            cv2.putText(frame, f"{recorded_frames}/{frames_per_sample} frames", (380, 58), cv2.FONT_HERSHEY_SIMPLEX, 0.5, COLOR_LAVENDER, 1, cv2.LINE_AA)
+
+            bar_x1, bar_y1, bar_x2, bar_y2 = 40, 80, 500, 98
+            draw_rounded_rect(frame, (bar_x1, bar_y1), (bar_x2, bar_y2), COLOR_BG_DARK, thickness=-1, radius=9)
+            fill_w = int((bar_x2 - bar_x1) * ratio)
+            if fill_w > 18:
+                draw_rounded_rect(frame, (bar_x1, bar_y1), (bar_x1 + fill_w, bar_y2), COLOR_CORAL, thickness=-1, radius=9)
 
             cv2.imshow("word data collector", frame)
             cv2.waitKey(20)
