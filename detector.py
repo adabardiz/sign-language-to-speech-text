@@ -48,6 +48,18 @@ KEY_FACE_INDICES = [
     78, 308, 82, 312    # lip curvature
 ]
 
+KEY_ARM_INDICES = [
+    11, 12, # left and right shoulders
+    13, 14, # left and right elbows
+    15, 16  # left and right wrists
+]
+
+ARM_CONNECTIONS = [
+    (11, 12), # shoulder line
+    (11, 13), (13, 15), 
+    (12, 14), (14, 16) 
+]
+
 def extract_face_features(face_landmarks):
     if not face_landmarks:
         return [0.0] * (len(KEY_FACE_INDICES) * 3)
@@ -57,6 +69,22 @@ def extract_face_features(face_landmarks):
         lm = face_landmarks[idx]
         face_feats.extend([lm.x - nose_tip[0], lm.y - nose_tip[1], lm.z - nose_tip[2]])
     return face_feats
+
+def extract_arm_features(pose_landmarks):
+    if not pose_landmarks:
+        return [0.0] * (len(KEY_ARM_INDICES) * 3)
+    left_shoulder = pose_landmarks[11]
+    right_shoulder = pose_landmarks[12]
+    shoulder_mid = np.array([
+        (left_shoulder.x + right_shoulder.x) / 2.0,
+        (left_shoulder.y + right_shoulder.y) / 2.0,
+        (left_shoulder.z + right_shoulder.z) / 2.0
+    ])
+    arm_feats = []
+    for idx in KEY_ARM_INDICES:
+        lm = pose_landmarks[idx]
+        arm_feats.extend([lm.x - shoulder_mid[0], lm.y - shoulder_mid[1], lm.z - shoulder_mid[2]])
+    return arm_feats
 
 def calculate_facial_intensity(face_landmarks):
     if not face_landmarks:
@@ -272,6 +300,12 @@ def main():
         min_tracking_confidence=0.50
     )
 
+    mp_pose = mp.solutions.pose
+    pose = mp_pose.Pose(
+        min_detection_confidence=0.50,
+        min_tracking_confidence=0.50
+    )
+
     cap = cv2.VideoCapture(0)
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
@@ -473,6 +507,24 @@ def main():
         face_results = face_mesh.process(rgb_frame)
         face_lms = face_results.multi_face_landmarks[0].landmark if face_results.multi_face_landmarks else None
         face_feats = extract_face_features(face_lms)
+
+        pose_results = pose.process(rgb_frame)
+        pose_lms = pose_results.pose_landmarks.landmark if pose_results.pose_landmarks else None
+        arm_feats = extract_arm_features(pose_lms)
+
+        # render arm tracking overlay
+        if pose_lms:
+            for start_idx, end_idx in ARM_CONNECTIONS:
+                s_lm = pose_lms[start_idx]
+                e_lm = pose_lms[end_idx]
+                if s_lm.visibility > 0.5 and e_lm.visibility > 0.5:
+                    start_p = (int(s_lm.x * w), int(s_lm.y * h))
+                    end_p = (int(e_lm.x * w), int(e_lm.y * h))
+                    cv2.line(frame, start_p, end_p, (200, 200, 200), 3, cv2.LINE_AA)
+            for idx in KEY_ARM_INDICES:
+                lm = pose_lms[idx]
+                if lm.visibility > 0.5:
+                    cv2.circle(frame, (int(lm.x * w), int(lm.y * h)), 6, COLOR_TERRACOTTA, -1, cv2.LINE_AA)
         
         intensity_mult, intensity_label = calculate_facial_intensity(face_lms)
 
@@ -553,7 +605,7 @@ def main():
 
             elif current_mode == "WORD" and asl_word_model is not None and features is not None:
                 if time.time() - last_word_pred_time >= WORD_COOLDOWN_DURATION:
-                    combined_frame_feats = list(features) + list(face_feats)
+                    combined_frame_feats = list(features) + list(face_feats) + list(arm_feats)
                     word_sequence_buffer.append(combined_frame_feats)
 
                     if len(word_sequence_buffer) == 30:
