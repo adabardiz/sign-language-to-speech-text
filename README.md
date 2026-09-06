@@ -65,3 +65,5 @@ Day 29: Added 14 words, tomorrow I'll make the ui cuter i lit had no time tday
 Day 30: 1 Month! Yipeee, today I made the ui cuter for collect_words.py, re-imagined the emotions logic: its (e) for any emotions that are being recorded into collect_words.py, re-incorporated the progress bar for detecting in detector.py, and a few things i dont think i can remember. I also added like 8 words, tomorrow I'll add words, add emotions & also maybe look into making this algorithm an app. oh and add arm tracking to both detector.py & to collect_words.py
 
 Day 31: Break
+
+Day 32: Added arm tracking, tomorrow I'll look into making this an app & adding words.
